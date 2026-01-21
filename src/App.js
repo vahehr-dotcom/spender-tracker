@@ -1,14 +1,10 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from './supabaseClient'
-import { loadStripe } from '@stripe/stripe-js'
 
 import Login from './components/Login'
 import AddExpenseForm from './components/AddExpenseForm'
 import ExpenseList from './components/ExpenseList'
 import MonthlySummary from './components/MonthlySummary'
-
-// Load Stripe
-const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY)
 
 function App() {
   const [session, setSession] = useState(null)
@@ -69,20 +65,20 @@ function App() {
   // NEW: learned indicator state
   const [categoryLearnedSource, setCategoryLearnedSource] = useState(null)
 
-  const showUndoBanner = (banner, ms = 12000) => {
+  const showUndoBanner = useCallback((banner, ms = 12000) => {
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current)
     setUndoBanner(banner)
     undoTimerRef.current = setTimeout(() => {
       setUndoBanner(null)
       undoTimerRef.current = null
     }, ms)
-  }
+  }, [])
 
-  const clearUndoBanner = () => {
+  const clearUndoBanner = useCallback(() => {
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current)
     undoTimerRef.current = null
     setUndoBanner(null)
-  }
+  }, [])
 
   const SpeechRecognition = useMemo(() => {
     return window.SpeechRecognition || window.webkitSpeechRecognition || null
@@ -232,7 +228,7 @@ function App() {
   }, [merchant, categories, session, suggestCategoryForMerchant, categoryId])
 
   // NEW: Receipt OCR with OpenAI GPT-4 Vision
-  const processReceiptWithOCR = async (file) => {
+  const processReceiptWithOCR = useCallback(async (file) => {
     if (!file) return
 
     setIsProcessingReceipt(true)
@@ -354,14 +350,14 @@ Rules:
     } finally {
       setIsProcessingReceipt(false)
     }
-  }
+  }, [suggestCategoryForMerchant, categories, status])
 
   // Trigger OCR when receipt file changes
   useEffect(() => {
     if (receiptFile && !isProcessingReceipt) {
       processReceiptWithOCR(receiptFile)
     }
-  }, [receiptFile])
+  }, [receiptFile, isProcessingReceipt, processReceiptWithOCR])
 
   // speech
   useEffect(() => {
@@ -458,7 +454,7 @@ Rules:
     }
   }
 
-  const loadExpenses = async () => {
+  const loadExpenses = useCallback(async () => {
     if (!session?.user?.id) return
 
     setStatus('')
@@ -489,12 +485,12 @@ Rules:
     for (const e of withReceipts) {
       await ensureReceiptThumb(e)
     }
-  }
+  }, [session, showArchived, search, buildMerchantMemory])
 
   useEffect(() => {
     if (!session) return
     loadExpenses()
-  }, [session, showArchived])
+  }, [session, showArchived, loadExpenses])
 
   const login = async (email, password) => {
     setStatus('')
