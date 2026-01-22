@@ -2,11 +2,10 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from './supabaseClient'
 
 import Login from './components/Login'
+import ChatAssistant from './components/ChatAssistant'
 import AddExpenseForm from './components/AddExpenseForm'
 import ExpenseList from './components/ExpenseList'
 import MonthlySummary from './components/MonthlySummary'
-import ChatAssistant from './components/ChatAssistant'
-
 
 function App() {
   const [session, setSession] = useState(null)
@@ -45,12 +44,6 @@ function App() {
   const [receiptUrls, setReceiptUrls] = useState({})
   const [isProcessingReceipt, setIsProcessingReceipt] = useState(false)
 
-  // Voice
-  const [voiceSupported, setVoiceSupported] = useState(false)
-  const [isListening, setIsListening] = useState(false)
-  const [transcript, setTranscript] = useState('')
-  const recognitionRef = useRef(null)
-
   // Archive
   const [showArchived, setShowArchived] = useState(false)
 
@@ -61,10 +54,10 @@ function App() {
   const [undoBanner, setUndoBanner] = useState(null)
   const undoTimerRef = useRef(null)
 
-  // Merchant-memory map: merchantKey -> { categoryId, count }
+  // Merchant-memory map
   const merchantMemoryRef = useRef(new Map())
 
-  // NEW: learned indicator state
+  // Learned indicator state
   const [categoryLearnedSource, setCategoryLearnedSource] = useState(null)
 
   const showUndoBanner = useCallback((banner, ms = 12000) => {
@@ -80,10 +73,6 @@ function App() {
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current)
     undoTimerRef.current = null
     setUndoBanner(null)
-  }, [])
-
-  const SpeechRecognition = useMemo(() => {
-    return window.SpeechRecognition || window.webkitSpeechRecognition || null
   }, [])
 
   const CATEGORY_RULES = useMemo(() => {
@@ -118,7 +107,6 @@ function App() {
         .single()
 
       if (!error && data) {
-        // SAFETY: only allow "pro" if explicitly stored as "pro"
         setSubscriptionStatus(data.subscription_status === 'pro' ? 'pro' : 'free')
       } else {
         await supabase.from('user_subscriptions').insert({
@@ -141,24 +129,14 @@ function App() {
     }
   }, [isProMode])
 
-  // Merchant key normalization (aliasing)
+  // Merchant key normalization
   const normalizeMerchantKey = useCallback((s) => {
     let t = String(s || '').toLowerCase().trim()
-
-    // normalize separators first
     t = t.replace(/[\s\-_]+/g, ' ')
-
-    // remove trailing store/location/unit suffixes
-    // examples: "starbucks #1234", "starbucks store 77", "starbucks location 12", "starbucks unit 5"
     t = t.replace(/\s*#\s*\d+\s*$/g, '')
     t = t.replace(/\s*(store|unit|location)\s*\d+\s*$/g, '')
-
-    // keep only safe matching chars
     t = t.replace(/[^a-z0-9 &]/g, '')
-
-    // collapse spaces
     t = t.replace(/\s+/g, ' ').trim()
-
     return t
   }, [])
 
@@ -215,7 +193,7 @@ function App() {
     return ruleResult
   }, [normalizeMerchantKey, categories, CATEGORY_RULES])
 
-  // Auto-select category when merchant changes (learned first, then rules)
+  // Auto-select category when merchant changes
   useEffect(() => {
     if (!session?.user?.id) return
     if (!merchant || !categories.length) {
@@ -229,7 +207,7 @@ function App() {
     }
   }, [merchant, categories, session, suggestCategoryForMerchant, categoryId])
 
-  // NEW: Receipt OCR with OpenAI GPT-4 Vision
+  // Receipt OCR with OpenAI GPT-4 Vision
   const processReceiptWithOCR = useCallback(async (file) => {
     if (!file) return
 
@@ -237,10 +215,8 @@ function App() {
     setStatus('🤖 Reading receipt with AI...')
 
     try {
-      // Convert file to base64
       const base64 = await fileToBase64(file)
 
-      // Call OpenAI GPT-4 Vision
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -272,9 +248,7 @@ Rules:
                 },
                 {
                   type: 'image_url',
-                  image_url: {
-                    url: base64
-                  }
+                  image_url: { url: base64 }
                 }
               ]
             }
@@ -295,7 +269,6 @@ Rules:
         throw new Error('No response from AI')
       }
 
-      // Parse JSON (strip markdown code fence if present)
       let jsonText = content
       if (jsonText.startsWith('```')) {
         jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
@@ -303,19 +276,16 @@ Rules:
 
       const parsed = JSON.parse(jsonText)
 
-      // Auto-fill form fields
       if (parsed.amount) {
         setAmount(String(parsed.amount))
       }
 
       if (parsed.merchant) {
         setMerchant(parsed.merchant)
-        // Trigger category auto-select via merchant memory
         const auto = suggestCategoryForMerchant(parsed.merchant)
         if (auto) {
           setCategoryId(auto)
         } else if (parsed.category_hint) {
-          // Fallback to AI's category hint if no learned/rule match
           const hintCat = categories.find(c => 
             c.name.toLowerCase() === parsed.category_hint.toLowerCase()
           )
@@ -327,7 +297,6 @@ Rules:
         try {
           const d = new Date(parsed.date)
           if (!isNaN(d.getTime())) {
-            // Convert to local datetime format
             const pad = (n) => String(n).padStart(2, '0')
             const yyyy = d.getFullYear()
             const mm = pad(d.getMonth() + 1)
@@ -360,68 +329,6 @@ Rules:
       processReceiptWithOCR(receiptFile)
     }
   }, [receiptFile, isProcessingReceipt, processReceiptWithOCR])
-
-  // speech
-  useEffect(() => {
-    if (!SpeechRecognition) {
-      setVoiceSupported(false)
-      return
-    }
-
-    setVoiceSupported(true)
-    const r = new SpeechRecognition()
-    r.lang = 'en-US'
-    r.interimResults = false
-    r.continuous = false
-
-    r.onstart = () => {
-      setIsListening(true)
-      setStatus('Listening...')
-    }
-
-    r.onend = () => {
-      setIsListening(false)
-      setStatus('')
-    }
-
-    r.onerror = () => {
-      setIsListening(false)
-      setStatus('Voice error (try again)')
-    }
-
-    r.onresult = (event) => {
-      const text = event?.results?.[0]?.[0]?.transcript || ''
-      const cleaned = text.trim()
-      setTranscript(cleaned)
-
-      const parsed = parseExpenseFromText(cleaned)
-      if (parsed.amount !== null) setAmount(String(parsed.amount))
-      if (parsed.merchant) {
-        setMerchant(parsed.merchant)
-        const auto = suggestCategoryForMerchant(parsed.merchant)
-        if (auto) setCategoryId(auto)
-      }
-
-      setStatus('Voice captured')
-    }
-
-    recognitionRef.current = r
-  }, [SpeechRecognition, suggestCategoryForMerchant])
-
-  const startListening = () => {
-    if (!recognitionRef.current) return
-    setTranscript('')
-    try {
-      recognitionRef.current.start()
-    } catch {
-      setStatus('Already listening...')
-    }
-  }
-
-  const stopListening = () => {
-    if (!recognitionRef.current) return
-    recognitionRef.current.stop()
-  }
 
   const loadCategories = useCallback(async () => {
     if (!session) return
@@ -562,7 +469,7 @@ Rules:
         category_id: categoryId,
         payment_method: paymentMethod,
         spent_at: spentAtIso,
-        raw_input: transcript || null,
+        raw_input: null,
         is_tax_deductible: isTaxDeductible,
         is_reimbursable: isProMode ? isReimbursable : false,
         employer_or_client: isProMode && isReimbursable ? (employerOrClient || null) : null,
@@ -615,7 +522,6 @@ Rules:
     setAmount('')
     setMerchant('')
     setSpentAtLocal(getNowLocalDateTime())
-    setTranscript('')
     setReceiptFile(null)
     setIsTaxDeductible(false)
     setNotes('')
@@ -630,6 +536,36 @@ Rules:
 
     setTimeout(() => setSaveSuccess(false), 2000)
 
+    await loadExpenses()
+  }
+
+  // NEW: Update expense (for inline Edit)
+  const updateExpense = async (updatedExpense) => {
+    setStatus('')
+    
+    const { error } = await supabase
+      .from('expenses')
+      .update({
+        amount: updatedExpense.amount,
+        merchant: updatedExpense.merchant,
+        category_id: updatedExpense.category_id,
+        payment_method: updatedExpense.payment_method,
+        spent_at: updatedExpense.spent_at,
+        is_tax_deductible: updatedExpense.is_tax_deductible,
+        is_reimbursable: updatedExpense.is_reimbursable,
+        employer_or_client: updatedExpense.employer_or_client,
+        notes: updatedExpense.notes,
+        tags: updatedExpense.tags
+      })
+      .eq('id', updatedExpense.id)
+
+    if (error) {
+      setStatus(`Update failed: ${error.message}`)
+      return
+    }
+
+    setStatus('✓ Updated')
+    setTimeout(() => setStatus(''), 2000)
     await loadExpenses()
   }
 
@@ -771,11 +707,29 @@ Rules:
     setShowPaywall(true)
   }
 
-  // FIXED: Stripe checkout is NOT implemented, and we DO NOT do a fake upgrade anymore.
   const handleStripeCheckout = async () => {
     setStatus('Stripe checkout not wired yet (no fake Pro upgrade).')
     setShowPaywall(false)
     setSubscriptionStatus('free')
+  }
+
+  // NEW: Handle AI commands
+  const handleAICommand = (command) => {
+    if (command.action === 'add_expense') {
+      // Auto-fill form from AI
+      if (command.data.amount) setAmount(String(command.data.amount))
+      if (command.data.merchant) setMerchant(command.data.merchant)
+      setStatus('✨ AI filled the form—review and save')
+    }
+
+    if (command.action === 'search') {
+      setSearch(command.data.query)
+      setTimeout(() => loadExpenses(), 100)
+    }
+
+    if (command.action === 'export') {
+      exportCsv()
+    }
   }
 
   if (!session) {
@@ -786,7 +740,7 @@ Rules:
   const canAddCategory = isProMode || customCount < 3
 
   return (
-    <div style={{ padding: 40, maxWidth: 820 }}>
+    <div style={{ padding: 40, maxWidth: 820, margin: '0 auto' }}>
       {/* Paywall Modal */}
       {showPaywall ? (
         <div style={{
@@ -831,8 +785,9 @@ Rules:
         </div>
       ) : null}
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <h1 style={{ margin: 0 }}>Spender Tracker</h1>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 30 }}>
+        <h1 style={{ margin: 0, fontSize: 32, fontWeight: 700 }}>💰 Spender Tracker</h1>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           {isProMode ? (
             <span style={{ 
@@ -866,7 +821,7 @@ Rules:
       {undoBanner ? (
         <div
           style={{
-            marginTop: 12,
+            marginBottom: 12,
             padding: '10px 12px',
             border: '1px solid #ddd',
             borderRadius: 12,
@@ -888,6 +843,16 @@ Rules:
         </div>
       ) : null}
 
+      {/* AI-FIRST INTERFACE */}
+      <ChatAssistant
+        expenses={expenses}
+        categories={categories}
+        isProMode={isProMode}
+        onUpgradeToPro={upgradeToPro}
+        onAICommand={handleAICommand}
+      />
+
+      {/* MANUAL FORM */}
       <AddExpenseForm
         amount={amount} setAmount={setAmount}
         merchant={merchant} setMerchant={setMerchant}
@@ -914,12 +879,6 @@ Rules:
 
         receiptFile={receiptFile} setReceiptFile={setReceiptFile}
 
-        voiceSupported={voiceSupported}
-        isListening={isListening}
-        transcript={transcript}
-        startListening={startListening}
-        stopListening={stopListening}
-
         onSave={addExpense}
         isSaving={isSaving}
         saveSuccess={saveSuccess}
@@ -931,6 +890,7 @@ Rules:
 
       <hr style={{ margin: '30px 0' }} />
 
+      {/* EXPENSE LIST */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0 }}>{showArchived ? 'Archived expenses' : 'Recent expenses'}</h2>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -970,6 +930,7 @@ Rules:
         onUnarchive={(id) => setArchivedForExpense(id, false)}
         onDelete={deleteExpense}
         onOpenReceipt={openReceipt}
+        onUpdateExpense={updateExpense}
       />
 
       <MonthlySummary 
@@ -978,13 +939,6 @@ Rules:
         isProMode={isProMode}
         onUpgradeToPro={upgradeToPro}
       />
-      <ChatAssistant
-        expenses={expenses}
-        categories={categories}
-        isProMode={isProMode}
-        onUpgradeToPro={upgradeToPro}
-      />
-
     </div>
   )
 }
@@ -1027,39 +981,6 @@ function pickCategoryIdFromMerchant(merchant, categories, rules) {
     }
   }
   return null
-}
-
-function parseExpenseFromText(text) {
-  const t = (text || '').toLowerCase()
-
-  const numMatch = t.match(/(?:\$?\s*)(\d+(?:\.\d{1,2})?)/)
-  const amount = numMatch ? Number(numMatch[1]) : null
-
-  let merchant = ''
-  const atMatch = t.match(/\bat\b\s+(.+)$/)
-  if (atMatch && atMatch[1]) {
-    merchant = cleanupMerchant(atMatch[1])
-  } else {
-    merchant = cleanupMerchant(
-      t
-        .replace(/spent|spend|paid|pay|dollars|bucks|\$/g, ' ')
-        .replace(/\d+(?:\.\d{1,2})?/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-    )
-  }
-
-  return { amount, merchant }
-}
-
-function cleanupMerchant(s) {
-  return (s || '')
-    .replace(/[.,!?]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ')
 }
 
 function sanitizeFilename(name) {

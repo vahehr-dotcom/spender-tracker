@@ -40,74 +40,28 @@ export default function AddExpenseForm({
   // receipt
   receiptFile, setReceiptFile,
 
-  // voice
-  voiceSupported,
-  isListening,
-  transcript,
-  startListening,
-  stopListening,
-
   // actions
   onSave,
   isSaving,
   saveSuccess,
 
-  // NEW: learned indicator
-  categoryLearnedSource // "learned" | "rule" | null
+  // learned indicator
+  categoryLearnedSource // "learned" | "rule" | "ai" | null
 }) {
   return (
-    <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto', fontFamily: 'system-ui, sans-serif' }}>
-      <h2 style={{ marginBottom: '20px' }}>Add Expense</h2>
-
-      {/* VOICE INPUT */}
-      {voiceSupported && (
-        <div style={{ 
-          marginBottom: '20px', 
-          padding: '15px', 
-          border: '2px solid #4A90E2',
-          borderRadius: '8px',
-          backgroundColor: isListening ? '#E3F2FD' : '#F5F5F5'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-            <button
-              onClick={isListening ? stopListening : startListening}
-              style={{
-                padding: '10px 20px',
-                fontSize: '16px',
-                fontWeight: 'bold',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                backgroundColor: isListening ? '#FF5252' : '#4CAF50',
-                color: 'white',
-                transition: 'background-color 0.3s'
-              }}
-            >
-              {isListening ? '🔴 Stop' : '🎤 Start Voice Input'}
-            </button>
-            {isListening && (
-              <span style={{ color: '#FF5252', fontWeight: 'bold', animation: 'pulse 1.5s infinite' }}>
-                Listening...
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: '14px', color: '#666', marginBottom: '8px' }}>
-            Say: <strong>"42 at Chevron"</strong> or <strong>"Spent 18 at Starbucks"</strong>
-          </div>
-          {transcript && (
-            <div style={{ 
-              marginTop: '10px', 
-              padding: '10px', 
-              backgroundColor: 'white',
-              border: '1px solid #ddd',
-              borderRadius: '4px',
-              fontSize: '14px'
-            }}>
-              <strong>Transcript:</strong> {transcript}
-            </div>
-          )}
-        </div>
-      )}
+    <div style={{ padding: '20px 0', maxWidth: '600px', margin: '0 auto', fontFamily: 'system-ui, sans-serif' }}>
+      
+      {/* DIVIDER: Or enter manually */}
+      <div style={{ 
+        textAlign: 'center', 
+        margin: '20px 0 30px 0',
+        fontSize: '14px',
+        color: '#999',
+        fontWeight: '600',
+        letterSpacing: '0.5px'
+      }}>
+        Or enter manually ↓
+      </div>
 
       {/* AMOUNT */}
       <div style={{ marginBottom: '15px' }}>
@@ -183,7 +137,7 @@ export default function AddExpenseForm({
               whiteSpace: 'nowrap'
             }}
           >
-            Set to now
+            Now
           </button>
         </div>
       </div>
@@ -216,6 +170,18 @@ export default function AddExpenseForm({
               fontWeight: 'bold'
             }}>
               Rule
+            </span>
+          )}
+          {categoryLearnedSource === 'ai' && (
+            <span style={{ 
+              fontSize: '12px', 
+              padding: '2px 8px', 
+              backgroundColor: '#2196F3', 
+              color: 'white', 
+              borderRadius: '10px',
+              fontWeight: 'bold'
+            }}>
+              AI
             </span>
           )}
         </div>
@@ -539,15 +505,8 @@ export default function AddExpenseForm({
           transition: 'background-color 0.3s'
         }}
       >
-        {isSaving ? 'Saving...' : saveSuccess ? '✓ Saved' : 'Save'}
+        {isSaving ? 'Saving...' : saveSuccess ? '✓ Saved' : 'Add Expense'}
       </button>
-
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-      `}</style>
     </div>
   )
 }

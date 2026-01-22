@@ -1,11 +1,17 @@
 import { useState, useRef, useEffect } from 'react'
 
-export default function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro }) {
-  const [chatInput, setChatInput] = useState('')
-  const [chatHistory, setChatHistory] = useState([])
+export default function ChatAssistant({ 
+  expenses, 
+  categories, 
+  isProMode, 
+  onUpgradeToPro,
+  onAICommand // NEW: callback for AI to execute commands (add, edit, search, export)
+}) {
+  const [aiInput, setAiInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
+  const [lastResponse, setLastResponse] = useState('')
   const recognitionRef = useRef(null)
   const utteranceRef = useRef(null)
 
@@ -34,13 +40,13 @@ export default function ChatAssistant({ expenses, categories, isProMode, onUpgra
     recognition.onresult = (event) => {
       const text = event?.results?.[0]?.[0]?.transcript || ''
       if (text.trim()) {
-        setChatInput(text.trim())
-        setTimeout(() => handleChatSubmit(text.trim()), 100)
+        setAiInput(text.trim())
+        setTimeout(() => handleAISubmit(text.trim()), 100)
       }
     }
 
     recognitionRef.current = recognition
-  }, [])
+  }, [expenses, categories])
 
   const startListening = () => {
     if (!recognitionRef.current) return
@@ -94,16 +100,17 @@ export default function ChatAssistant({ expenses, categories, isProMode, onUpgra
     utteranceRef.current = null
   }
 
-  const handleChatSubmit = async (voiceInput = null) => {
-    const userMessage = voiceInput || chatInput.trim()
+  const handleAISubmit = async (voiceInput = null) => {
+    const userMessage = voiceInput || aiInput.trim()
     if (!userMessage) return
 
-    setChatInput('')
-    setChatHistory(prev => [...prev, { role: 'user', content: userMessage }])
+    setAiInput('')
     setIsThinking(true)
+    setLastResponse('')
 
     try {
       const expenseData = expenses.map(e => ({
+        id: e.id,
         merchant: e.merchant,
         amount: Number(e.amount),
         date: new Date(e.spent_at).toISOString().split('T')[0],
@@ -114,6 +121,41 @@ export default function ChatAssistant({ expenses, categories, isProMode, onUpgra
         notes: e.notes
       }))
 
+      const systemPrompt = isProMode 
+        ? `You are an elite AI financial advisor and personal accountant—intelligent, attentive, and always present. You speak with the authority of a trusted wealth advisor.
+
+Current date: ${new Date().toISOString().split('T')[0]}
+
+Client's expense data:
+${JSON.stringify(expenseData, null, 2)}
+
+Communication style:
+- Professional yet warm—private wealth advisor, not chatbot
+- Proactive: anticipate needs, offer insights beyond what's asked
+- Precise with numbers: include amounts, dates, merchant names
+- Context-aware: reference patterns, trends, anomalies
+- Natural, flowing language (you're speaking, not writing)
+- Focused responses (60-120 words)
+- Follow up with relevant questions/suggestions when appropriate
+
+When the user asks to:
+- Add/create expense: Extract details, confirm, then respond with confirmation
+- Edit expense: Identify which expense, ask for changes
+- Show/filter expenses: List matching expenses clearly
+- Export data: Acknowledge and explain what will be exported
+
+Pro features available: Deep analysis, spending trends, predictions, tax optimization.`
+        : `You are a helpful AI expense assistant. You can answer basic questions about spending.
+
+Current date: ${new Date().toISOString().split('T')[0]}
+
+Expense data:
+${JSON.stringify(expenseData, null, 2)}
+
+Keep responses brief (40-80 words). For advanced analysis, insights, or predictions, mention: "Upgrade to Pro for deep financial analysis."
+
+Basic features: View expenses, search by merchant/date, simple totals.`
+
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -123,38 +165,10 @@ export default function ChatAssistant({ expenses, categories, isProMode, onUpgra
         body: JSON.stringify({
           model: 'gpt-4o',
           messages: [
-            {
-              role: 'system',
-              content: `You are an elite financial advisor and personal accountant—intelligent, attentive, and always present. You speak with the authority of a trusted advisor, but remain warm and personable. Your client values precision, insight, and sophistication.
-
-Current date: ${new Date().toISOString().split('T')[0]}
-
-Client's expense data:
-${JSON.stringify(expenseData, null, 2)}
-
-Communication style:
-- Professional yet personable—think private wealth advisor, not chatbot
-- Proactive: anticipate needs, offer insights beyond what's asked
-- Precise with numbers: always include specific amounts, dates, merchant names
-- Context-aware: reference patterns, trends, anomalies
-- Confident but never arrogant
-- Use natural, flowing language (you're speaking, not writing a report)
-- Keep responses focused (60-120 words ideal)
-- When appropriate, follow up with a relevant question or suggestion
-
-Examples of your tone:
-❌ "You spent $42.50 at Starbucks on Nov 15."
-✅ "On November 15th, you had a $42.50 transaction at Starbucks. I noticed you've been there three times this month—would you like me to track your coffee spending separately?"
-
-❌ "Last month total: $1,234"
-✅ "Last month came to $1,234—about 15% higher than your October baseline. The increase was primarily in dining, particularly that $180 at Il Fornaio. Celebrating something?"
-
-Always remember: You're their trusted financial brain, always watching, always ready.`
-            },
-            ...chatHistory.map(msg => ({ role: msg.role, content: msg.content })),
+            { role: 'system', content: systemPrompt },
             { role: 'user', content: userMessage }
           ],
-          max_tokens: 400,
+          max_tokens: isProMode ? 400 : 200,
           temperature: 0.7
         })
       })
@@ -170,238 +184,231 @@ Always remember: You're their trusted financial brain, always watching, always r
         throw new Error('No response received')
       }
 
-      setChatHistory(prev => [...prev, { role: 'assistant', content: aiMessage }])
+      setLastResponse(aiMessage)
       speak(aiMessage)
 
+      // Parse AI response for commands (add, edit, search, export)
+      if (onAICommand) {
+        parseAndExecuteCommand(userMessage, aiMessage)
+      }
+
     } catch (err) {
-      console.error('Chat error:', err)
-      const errorMsg = `I apologize—I'm having trouble accessing that information right now. Please try again in a moment.`
-      setChatHistory(prev => [...prev, { 
-        role: 'assistant', 
-        content: errorMsg
-      }])
+      console.error('AI error:', err)
+      const errorMsg = `I apologize—I'm having trouble right now. Please try again.`
+      setLastResponse(errorMsg)
       speak(errorMsg)
     } finally {
       setIsThinking(false)
     }
   }
 
-  if (!isProMode) {
-    return (
-      <div style={{ marginTop: 40 }}>
-        <div style={{
-          padding: 32,
-          border: '2px solid #e0e0e0',
-          borderRadius: 16,
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          color: 'white',
-          textAlign: 'center',
-          boxShadow: '0 8px 32px rgba(102, 126, 234, 0.3)'
-        }}>
-          <h2 style={{ marginTop: 0, fontSize: 28, fontWeight: 700 }}>Your AI Financial Advisor</h2>
-          <p style={{ fontSize: 18, marginBottom: 24, opacity: 0.95 }}>
-            Get instant answers through natural voice conversation. Your personal accountant, always present, always ready.
-          </p>
-          <button 
-            onClick={onUpgradeToPro}
-            style={{
-              padding: '14px 32px',
-              fontSize: 18,
-              backgroundColor: 'white',
-              color: '#667eea',
-              border: 'none',
-              borderRadius: 12,
-              cursor: 'pointer',
-              fontWeight: 700,
-              boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
-              transition: 'transform 0.2s'
-            }}
-            onMouseOver={e => e.target.style.transform = 'scale(1.05)'}
-            onMouseOut={e => e.target.style.transform = 'scale(1)'}
-          >
-            Activate AI Advisor
-          </button>
-        </div>
-      </div>
-    )
+  const parseAndExecuteCommand = (userMsg, aiMsg) => {
+    const lowerUser = userMsg.toLowerCase()
+    const lowerAI = aiMsg.toLowerCase()
+
+    // Detect: "add expense", "create expense", "I spent..."
+    if (lowerUser.includes('add') || lowerUser.includes('create') || lowerUser.includes('spent')) {
+      // Parse amount and merchant from user message
+      const amountMatch = userMsg.match(/(\d+\.?\d*)/)
+      const amount = amountMatch ? parseFloat(amountMatch[1]) : null
+
+      let merchant = ''
+      const atMatch = userMsg.match(/at\s+([a-z0-9\s]+)/i)
+      if (atMatch) {
+        merchant = atMatch[1].trim()
+      }
+
+      if (amount && merchant) {
+        onAICommand({ 
+          action: 'add_expense', 
+          data: { amount, merchant } 
+        })
+      }
+    }
+
+    // Detect: "show receipts", "filter by", "search for"
+    if (lowerUser.includes('show') || lowerUser.includes('filter') || lowerUser.includes('search')) {
+      // Extract search term
+      const searchTermMatch = userMsg.match(/(receipts?|expenses?)\s+(from|for|at)\s+([a-z0-9\s]+)/i)
+      if (searchTermMatch) {
+        onAICommand({
+          action: 'search',
+          data: { query: searchTermMatch[3].trim() }
+        })
+      }
+    }
+
+    // Detect: "export", "download"
+    if (lowerUser.includes('export') || lowerUser.includes('download')) {
+      onAICommand({ action: 'export' })
+    }
   }
 
   return (
     <div style={{ 
-      position: 'fixed',
-      bottom: 24,
-      right: 24,
-      width: 420,
-      maxHeight: '70vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      borderRadius: 20,
-      boxShadow: '0 16px 48px rgba(0,0,0,0.3)',
-      display: 'flex',
-      flexDirection: 'column',
-      zIndex: 1000,
-      overflow: 'hidden'
+      padding: '24px 0',
+      maxWidth: 600,
+      margin: '0 auto',
+      fontFamily: 'system-ui, sans-serif'
     }}>
-      {/* Header */}
+      {/* AI Input Interface */}
       <div style={{
-        padding: '20px 24px',
-        color: 'white',
-        background: 'rgba(0,0,0,0.2)',
-        backdropFilter: 'blur(10px)'
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        borderRadius: 16,
+        padding: 24,
+        boxShadow: '0 8px 32px rgba(102, 126, 234, 0.3)',
+        marginBottom: 20
       }}>
-        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>🧠 Your AI Advisor</div>
-        <div style={{ fontSize: 13, opacity: 0.85 }}>Always present, always ready</div>
-      </div>
-
-      {/* Chat area */}
-      <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        padding: '20px',
-        background: 'white'
-      }}>
-        {chatHistory.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px 20px', color: '#666' }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>🎙️</div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Ready when you are</div>
-            <div style={{ fontSize: 14, lineHeight: 1.6, opacity: 0.8 }}>
-              Just speak naturally:
-              <div style={{ marginTop: 12, fontStyle: 'italic' }}>
-                "What did I spend at Macy's?"<br/>
-                "How's my spending this month?"<br/>
-                "Any unusual transactions?"
-              </div>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: 12,
+          marginBottom: 16
+        }}>
+          <div style={{ fontSize: 32 }}>🧠</div>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: 'white' }}>
+              Your AI Assistant
+            </div>
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)' }}>
+              {isProMode ? 'Elite advisor mode • Always ready' : 'Basic mode • Upgrade for deep insights'}
             </div>
           </div>
-        ) : (
-          chatHistory.map((msg, idx) => (
-            <div 
-              key={idx} 
-              style={{
-                marginBottom: 16,
-                display: 'flex',
-                flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
-                alignItems: 'flex-start',
-                gap: 12
-              }}
-            >
-              <div style={{
-                width: 36,
-                height: 36,
-                borderRadius: '50%',
-                background: msg.role === 'user' ? '#667eea' : '#2e7d32',
-                color: 'white',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 18,
-                flexShrink: 0
-              }}>
-                {msg.role === 'user' ? '👤' : '🧠'}
-              </div>
-              <div style={{
-                maxWidth: '75%',
-                padding: '12px 16px',
-                borderRadius: 16,
-                background: msg.role === 'user' ? '#f0f0f0' : '#e8f5e9',
-                fontSize: 15,
-                lineHeight: 1.5,
-                whiteSpace: 'pre-wrap'
-              }}>
-                {msg.content}
-              </div>
-            </div>
-          ))
-        )}
-        {isThinking && (
-          <div style={{ textAlign: 'center', padding: 20, fontStyle: 'italic', color: '#666' }}>
-            Analyzing...
-          </div>
-        )}
-      </div>
-
-      {/* Controls */}
-      <div style={{
-        padding: '16px 20px',
-        background: 'rgba(0,0,0,0.05)',
-        borderTop: '1px solid rgba(0,0,0,0.1)'
-      }}>
-        {(isListening || isSpeaking) && (
-          <div style={{ 
-            textAlign: 'center', 
-            marginBottom: 12,
-            padding: 8,
-            background: isListening ? '#e3f2fd' : '#fff3e0',
-            borderRadius: 8,
-            fontSize: 14,
-            fontWeight: 600,
-            color: isListening ? '#1976d2' : '#f57c00'
-          }}>
-            {isListening && '🎙️ Listening...'}
-            {isSpeaking && '🔊 Speaking...'}
-          </div>
-        )}
-        
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={isListening ? stopListening : startListening}
-            disabled={isThinking || isSpeaking}
-            style={{
-              flex: 1,
-              padding: '14px',
-              fontSize: 16,
-              fontWeight: 700,
-              border: 'none',
-              borderRadius: 12,
-              background: isListening ? '#ff5252' : '#4caf50',
-              color: 'white',
-              cursor: isThinking || isSpeaking ? 'not-allowed' : 'pointer',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-              opacity: isThinking || isSpeaking ? 0.5 : 1
-            }}
-          >
-            {isListening ? '⏸ Pause' : '🎤 Speak'}
-          </button>
-          
-          {isSpeaking && (
-            <button
-              onClick={stopSpeaking}
-              style={{
-                padding: '14px 20px',
-                fontSize: 16,
-                fontWeight: 700,
-                border: 'none',
-                borderRadius: 12,
-                background: '#ff9800',
-                color: 'white',
-                cursor: 'pointer',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-              }}
-            >
-              🔇
-            </button>
-          )}
         </div>
 
-        {chatHistory.length > 0 && (
-          <button
-            onClick={() => {
-              setChatHistory([])
-              stopSpeaking()
+        {/* Input + Voice */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <input
+            type="text"
+            value={aiInput}
+            onChange={(e) => setAiInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleAISubmit()
             }}
+            placeholder="How can I help you today?"
+            disabled={isThinking || isListening}
             style={{
-              width: '100%',
-              marginTop: 8,
-              padding: '10px',
-              fontSize: 13,
-              border: '1px solid rgba(0,0,0,0.1)',
-              borderRadius: 8,
-              background: 'white',
-              color: '#666',
-              cursor: 'pointer'
+              flex: 1,
+              padding: '14px 18px',
+              fontSize: 16,
+              border: 'none',
+              borderRadius: 12,
+              backgroundColor: 'white',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              outline: 'none'
             }}
+          />
+          <button
+            onClick={isListening ? stopListening : startListening}
+            disabled={isThinking}
+            style={{
+              padding: '14px 20px',
+              fontSize: 20,
+              border: 'none',
+              borderRadius: 12,
+              background: isListening ? '#ff5252' : 'white',
+              color: isListening ? 'white' : '#667eea',
+              cursor: isThinking ? 'not-allowed' : 'pointer',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+              transition: 'transform 0.2s',
+              opacity: isThinking ? 0.5 : 1
+            }}
+            onMouseOver={e => !isThinking && (e.target.style.transform = 'scale(1.05)')}
+            onMouseOut={e => e.target.style.transform = 'scale(1)'}
           >
-            Clear Conversation
+            {isListening ? '⏸' : '🎤'}
           </button>
+        </div>
+
+        {/* Status indicators */}
+        {(isListening || isThinking || isSpeaking) && (
+          <div style={{
+            marginTop: 12,
+            padding: '10px 14px',
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.2)',
+            color: 'white',
+            fontSize: 14,
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8
+          }}>
+            {isListening && <>🎙️ Listening...</>}
+            {isThinking && <>⏳ Thinking...</>}
+            {isSpeaking && (
+              <>
+                🔊 Speaking...
+                <button
+                  onClick={stopSpeaking}
+                  style={{
+                    marginLeft: 'auto',
+                    padding: '4px 12px',
+                    fontSize: 12,
+                    border: 'none',
+                    borderRadius: 6,
+                    background: 'rgba(0,0,0,0.2)',
+                    color: 'white',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Stop
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Last AI Response */}
+        {lastResponse && (
+          <div style={{
+            marginTop: 16,
+            padding: 16,
+            borderRadius: 12,
+            background: 'rgba(255,255,255,0.95)',
+            fontSize: 15,
+            lineHeight: 1.6,
+            color: '#333'
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 8, color: '#667eea' }}>
+              AI Response:
+            </div>
+            {lastResponse}
+          </div>
+        )}
+
+        {/* Pro teaser for free users */}
+        {!isProMode && (
+          <div style={{
+            marginTop: 16,
+            padding: '12px 16px',
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.15)',
+            color: 'white',
+            fontSize: 13,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12
+          }}>
+            <span>✨ Get deep insights, trends, predictions</span>
+            <button
+              onClick={onUpgradeToPro}
+              style={{
+                padding: '6px 14px',
+                fontSize: 12,
+                fontWeight: 700,
+                border: 'none',
+                borderRadius: 8,
+                background: 'white',
+                color: '#667eea',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              Upgrade
+            </button>
+          </div>
         )}
       </div>
     </div>
