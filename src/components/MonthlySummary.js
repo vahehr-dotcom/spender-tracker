@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS,
@@ -14,6 +14,8 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
 export default function MonthlySummary({ expenses, categories, isProMode, onUpgradeToPro }) {
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
+  const [aiInsights, setAiInsights] = useState([])
+  const [loadingInsights, setLoadingInsights] = useState(false)
 
   const monthOptions = useMemo(() => {
     if (!expenses || expenses.length === 0) return []
@@ -82,7 +84,8 @@ export default function MonthlySummary({ expenses, categories, isProMode, onUpgr
       taxDeductible,
       taxCount,
       reimbursable,
-      reimbursableCount
+      reimbursableCount,
+      filtered
     }
   }, [expenses, categories, selectedMonth])
 
@@ -145,6 +148,90 @@ export default function MonthlySummary({ expenses, categories, isProMode, onUpgr
 
     return result
   }, [summary, previousMonthSummary, selectedMonth, isProMode])
+
+  // AI Insights (Pro only)
+  useEffect(() => {
+    if (!isProMode || !summary || summary.filtered.length === 0) {
+      setAiInsights([])
+      return
+    }
+
+    const generateAIInsights = async () => {
+      setLoadingInsights(true)
+      try {
+        // Prepare expense data for AI analysis
+        const expenseData = summary.filtered.map(e => ({
+          merchant: e.merchant,
+          amount: Number(e.amount),
+          date: new Date(e.spent_at).toISOString().split('T')[0],
+          category: categories.find(c => c.id === e.category_id)?.name || 'Other'
+        }))
+
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              {
+                role: 'user',
+                content: `Analyze these monthly expenses and provide 3-5 actionable insights. Focus on:
+- Duplicate transactions (same merchant, similar amount, same day)
+- Potential subscriptions (recurring merchant, similar amounts)
+- Spending spikes (unusual high amounts for specific merchants)
+- Category trends
+
+Expenses:
+${JSON.stringify(expenseData, null, 2)}
+
+Return ONLY a JSON array of insight strings (no markdown, no code fence):
+["🔄 insight 1", "💳 insight 2", "⚠️ insight 3"]
+
+Rules:
+- Max 5 insights
+- Be specific with merchant names and amounts
+- Use emojis: 🔄 (duplicate), 💳 (subscription), ⚠️ (spike), 💡 (trend)
+- Keep each insight under 100 characters`
+              }
+            ],
+            max_tokens: 500,
+            temperature: 0.3
+          })
+        })
+
+        if (!response.ok) {
+          throw new Error(`AI API error: ${response.status}`)
+        }
+
+        const data = await response.json()
+        const content = data?.choices?.[0]?.message?.content?.trim()
+
+        if (!content) {
+          throw new Error('No insights from AI')
+        }
+
+        // Parse JSON (strip markdown if present)
+        let jsonText = content
+        if (jsonText.startsWith('```')) {
+          jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+        }
+
+        const parsed = JSON.parse(jsonText)
+        setAiInsights(Array.isArray(parsed) ? parsed : [])
+
+      } catch (err) {
+        console.error('AI Insights error:', err)
+        setAiInsights([])
+      } finally {
+        setLoadingInsights(false)
+      }
+    }
+
+    generateAIInsights()
+  }, [summary, isProMode, categories])
 
   const chartData = useMemo(() => {
     if (!summary) return null
@@ -251,6 +338,30 @@ export default function MonthlySummary({ expenses, categories, isProMode, onUpgr
             </div>
           ) : null}
 
+          {/* AI Insights (Pro only) */}
+          {isProMode && (
+            <div style={{ 
+              marginBottom: 20, 
+              padding: 16, 
+              backgroundColor: '#e8f5e9', 
+              borderRadius: 10,
+              border: '2px solid #4caf50'
+            }}>
+              <h3 style={{ marginTop: 0, marginBottom: 12, color: '#2e7d32' }}>🤖 AI-Powered Insights</h3>
+              {loadingInsights ? (
+                <div style={{ fontStyle: 'italic', color: '#666' }}>Analyzing your spending patterns...</div>
+              ) : aiInsights.length > 0 ? (
+                aiInsights.map((insight, idx) => (
+                  <div key={idx} style={{ marginBottom: 8, lineHeight: 1.5, fontWeight: 500 }}>
+                    {insight}
+                  </div>
+                ))
+              ) : (
+                <div style={{ fontStyle: 'italic', color: '#666' }}>No AI insights available for this period.</div>
+              )}
+            </div>
+          )}
+
           <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 30 }}>
             <thead>
               <tr style={{ borderBottom: '2px solid #ddd', textAlign: 'left' }}>
@@ -284,7 +395,7 @@ export default function MonthlySummary({ expenses, categories, isProMode, onUpgr
               textAlign: 'center',
               backgroundColor: '#fff8e1'
             }}>
-              <h3 style={{ marginTop: 0 }}>📊 Unlock Charts & Advanced Insights</h3>
+              <h3 style={{ marginTop: 0 }}>📊 Unlock Charts & AI Insights</h3>
               <p style={{ marginBottom: 16 }}>Upgrade to Pro to visualize your spending with beautiful charts and get AI-powered predictions.</p>
               <button 
                 onClick={onUpgradeToPro}
