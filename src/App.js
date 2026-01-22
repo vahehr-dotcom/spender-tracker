@@ -5,6 +5,8 @@ import Login from './components/Login'
 import AddExpenseForm from './components/AddExpenseForm'
 import ExpenseList from './components/ExpenseList'
 import MonthlySummary from './components/MonthlySummary'
+import ChatAssistant from './components/ChatAssistant'
+
 
 function App() {
   const [session, setSession] = useState(null)
@@ -976,6 +978,13 @@ Rules:
         isProMode={isProMode}
         onUpgradeToPro={upgradeToPro}
       />
+      <ChatAssistant
+        expenses={expenses}
+        categories={categories}
+        isProMode={isProMode}
+        onUpgradeToPro={upgradeToPro}
+      />
+
     </div>
   )
 }
