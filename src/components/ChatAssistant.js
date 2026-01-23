@@ -13,7 +13,7 @@ export default function ChatAssistant({
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [lastResponse, setLastResponse] = useState('')
   const recognitionRef = useRef(null)
-  const utteranceRef = useRef(null)
+  const audioRef = useRef(null) // For OpenAI audio playback
 
   // Initialize speech recognition
   useEffect(() => {
@@ -50,10 +50,7 @@ export default function ChatAssistant({
 
   const startListening = () => {
     if (!recognitionRef.current) return
-    if (utteranceRef.current) {
-      window.speechSynthesis.cancel()
-      setIsSpeaking(false)
-    }
+    stopSpeaking() // Stop any ongoing speech
     try {
       recognitionRef.current.start()
     } catch (err) {
@@ -66,38 +63,65 @@ export default function ChatAssistant({
     recognitionRef.current.stop()
   }
 
-  const speak = (text) => {
+  // NEW: OpenAI TTS with nova voice
+  const speak = async (text) => {
     if (!text) return
     
-    window.speechSynthesis.cancel()
-    
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.rate = 0.95
-    utterance.pitch = 1.0
-    utterance.volume = 1.0
-    
-    utterance.onstart = () => {
-      setIsSpeaking(true)
-    }
-    
-    utterance.onend = () => {
+    stopSpeaking() // Stop any ongoing speech
+    setIsSpeaking(true)
+
+    try {
+      const response = await fetch('https://api.openai.com/v1/audio/speech', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'tts-1',
+          voice: 'nova',
+          input: text,
+          speed: 1.0
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('TTS failed')
+      }
+
+      const audioBlob = await response.blob()
+      const audioUrl = URL.createObjectURL(audioBlob)
+      
+      const audio = new Audio(audioUrl)
+      audioRef.current = audio
+
+      audio.onended = () => {
+        setIsSpeaking(false)
+        URL.revokeObjectURL(audioUrl)
+        audioRef.current = null
+      }
+
+      audio.onerror = () => {
+        setIsSpeaking(false)
+        URL.revokeObjectURL(audioUrl)
+        audioRef.current = null
+      }
+
+      await audio.play()
+
+    } catch (err) {
+      console.error('TTS error:', err)
       setIsSpeaking(false)
-      utteranceRef.current = null
     }
-    
-    utterance.onerror = () => {
-      setIsSpeaking(false)
-      utteranceRef.current = null
-    }
-    
-    utteranceRef.current = utterance
-    window.speechSynthesis.speak(utterance)
   }
 
   const stopSpeaking = () => {
-    window.speechSynthesis.cancel()
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      audioRef.current = null
+    }
     setIsSpeaking(false)
-    utteranceRef.current = null
   }
 
   const handleAISubmit = async (voiceInput = null) => {
