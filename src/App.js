@@ -35,6 +35,13 @@ function App() {
   const [employerOrClient, setEmployerOrClient] = useState('')
   const [tagsText, setTagsText] = useState('')
 
+  // NEW: Budget tracking state
+  const [budgets, setBudgets] = useState({}) // { categoryId: { limit: number, spent: number } }
+  const [showBudgetPanel, setShowBudgetPanel] = useState(false)
+
+  // NEW: AI Insights state
+  const [aiInsights, setAiInsights] = useState(null) // { prediction, recurring, alerts }
+
   // Custom categories
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState('')
@@ -78,7 +85,7 @@ function App() {
   const CATEGORY_RULES = useMemo(() => {
     return {
       Gas: ['chevron', 'shell', '76', 'mobile', 'exxon', 'bp', 'arco', 'valero', 'costco gas'],
-      Food: ['starbucks', 'mcdonald', 'chipotle', 'taco', 'pizza', 'restaurant', 'cafe', 'coffee'],
+      Food: ['starbucks', 'mcdonald', 'chipotle', 'taco', 'pizza', 'restaurant', 'cafe', 'coffee', 'netflix', 'spotify'],
       Home: ['home depot', 'lowes', "lowe's", 'ikea', 'target', 'walmart', 'amazon'],
       Personal: ['cvs', 'walgreens', 'ulta', 'sephora', 'barber', 'salon', 'gym'],
       Transportation: ['uber', 'lyft', 'taxi', 'bus', 'train', 'parking'],
@@ -207,7 +214,7 @@ function App() {
     }
   }, [merchant, categories, session, suggestCategoryForMerchant, categoryId])
 
-  // Receipt OCR with OpenAI GPT-4 Vision
+  // NEW FEATURE 5: Enhanced Receipt OCR with tip/tax breakdown
   const processReceiptWithOCR = useCallback(async (file) => {
     if (!file) return
 
@@ -231,20 +238,25 @@ function App() {
               content: [
                 {
                   type: 'text',
-                  text: `Extract expense data from this receipt image. Return ONLY a valid JSON object (no markdown, no code fence, no extra text) with these exact keys:
+                  text: `Extract DETAILED expense data from this receipt. Return ONLY valid JSON (no markdown):
 {
-  "amount": <total amount as number, e.g. 42.50>,
-  "merchant": <merchant/store name as string>,
-  "date": <transaction date in YYYY-MM-DD format, or null if not found>,
-  "category_hint": <one of: "Gas", "Food", "Home", "Personal", "Transportation", "Other", or null>
+  "amount": <total after tax/tip as number>,
+  "merchant": <store name string>,
+  "date": <YYYY-MM-DD or null>,
+  "category_hint": <"Gas"|"Food"|"Home"|"Personal"|"Transportation"|"Other"|null>,
+  "subtotal": <amount before tax as number or null>,
+  "tax": <tax amount as number or null>,
+  "tip": <tip amount as number or null>,
+  "tip_percent": <tip percentage as number or null>
 }
 
 Rules:
-- amount: extract the TOTAL (after tax), not subtotal. Return as number without $ symbol.
-- merchant: clean store name (e.g., "Starbucks", "Chevron")
-- date: use YYYY-MM-DD format. If unclear or not found, return null.
-- category_hint: suggest ONE category based on merchant type. Return null if unsure.
-- Return ONLY the JSON object. No explanations, no code fences.`
+- amount: TOTAL paid (subtotal + tax + tip)
+- Extract subtotal, tax, tip separately if visible
+- Calculate tip_percent if tip and subtotal available
+- merchant: clean name (e.g. "Starbucks")
+- date: YYYY-MM-DD format
+- Return ONLY JSON, no explanations`
                 },
                 {
                   type: 'image_url',
@@ -253,7 +265,7 @@ Rules:
               ]
             }
           ],
-          max_tokens: 300,
+          max_tokens: 400,
           temperature: 0
         })
       })
@@ -308,12 +320,22 @@ Rules:
         } catch {}
       }
 
-      setStatus('✅ Receipt data extracted!')
+      // Build enhanced notes with breakdown
+      let enhancedNotes = ''
+      if (parsed.subtotal) enhancedNotes += `Subtotal: $${parsed.subtotal.toFixed(2)}\n`
+      if (parsed.tax) enhancedNotes += `Tax: $${parsed.tax.toFixed(2)}\n`
+      if (parsed.tip) {
+        enhancedNotes += `Tip: $${parsed.tip.toFixed(2)}`
+        if (parsed.tip_percent) enhancedNotes += ` (${parsed.tip_percent.toFixed(1)}%)`
+      }
+      if (enhancedNotes) setNotes(enhancedNotes.trim())
+
+      setStatus('✅ Receipt analyzed! (Subtotal, tax, tip extracted)')
       setCategoryLearnedSource('ai')
 
       setTimeout(() => {
-        if (status === '✅ Receipt data extracted!') setStatus('')
-      }, 3000)
+        if (status.includes('Receipt analyzed')) setStatus('')
+      }, 4000)
 
     } catch (err) {
       console.error('OCR error:', err)
@@ -363,6 +385,104 @@ Rules:
     }
   }
 
+  // NEW FEATURE 2 & 3 & 4: Calculate budgets, predictions, recurring expenses
+  const calculateAIInsights = useCallback((expensesList, categoriesList) => {
+    if (!isProMode || !expensesList.length) {
+      setAiInsights(null)
+      return
+    }
+
+    const now = new Date()
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    
+    // Current month expenses
+    const thisMonth = expensesList.filter(e => {
+      const d = new Date(e.spent_at)
+      const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      return m === currentMonth && !e.archived
+    })
+
+    // Last month expenses
+    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const lastMonth = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`
+    const lastMonthExpenses = expensesList.filter(e => {
+      const d = new Date(e.spent_at)
+      const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      return m === lastMonth && !e.archived
+    })
+
+    // FEATURE 3: Spending prediction
+    const thisMonthTotal = thisMonth.reduce((sum, e) => sum + Number(e.amount), 0)
+    const lastMonthTotal = lastMonthExpenses.reduce((sum, e) => sum + Number(e.amount), 0)
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    const daysPassed = now.getDate()
+    const daysRemaining = daysInMonth - daysPassed
+    const dailyAvg = daysPassed > 0 ? thisMonthTotal / daysPassed : 0
+    const predictedTotal = thisMonthTotal + (dailyAvg * daysRemaining)
+
+    // FEATURE 4: Recurring expense detection
+    const merchantFrequency = {}
+    expensesList.slice(0, 90).forEach(e => { // Last 90 expenses
+      const key = normalizeMerchantKey(e.merchant)
+      if (!key) return
+      if (!merchantFrequency[key]) {
+        merchantFrequency[key] = { merchant: e.merchant, amounts: [], dates: [] }
+      }
+      merchantFrequency[key].amounts.push(Number(e.amount))
+      merchantFrequency[key].dates.push(new Date(e.spent_at))
+    })
+
+    const recurring = []
+    Object.entries(merchantFrequency).forEach(([key, data]) => {
+      if (data.amounts.length >= 2) {
+        const avgAmount = data.amounts.reduce((a, b) => a + b, 0) / data.amounts.length
+        const amountVariance = Math.max(...data.amounts) - Math.min(...data.amounts)
+        const isConsistentAmount = amountVariance < avgAmount * 0.1 // Less than 10% variance
+
+        if (isConsistentAmount && data.dates.length >= 2) {
+          // Check if dates are roughly monthly
+          const sortedDates = data.dates.sort((a, b) => b - a)
+          const daysBetween = []
+          for (let i = 0; i < sortedDates.length - 1; i++) {
+            const diff = (sortedDates[i] - sortedDates[i + 1]) / (1000 * 60 * 60 * 24)
+            daysBetween.push(diff)
+          }
+          const avgDaysBetween = daysBetween.reduce((a, b) => a + b, 0) / daysBetween.length
+
+          if (avgDaysBetween >= 25 && avgDaysBetween <= 35) { // Roughly monthly
+            recurring.push({
+              merchant: data.merchant,
+              amount: avgAmount,
+              frequency: 'monthly',
+              lastDate: sortedDates[0]
+            })
+          }
+        }
+      }
+    })
+
+    // FEATURE 2: Budget tracking - calculate spent per category
+    const categorySpending = {}
+    thisMonth.forEach(e => {
+      const catId = e.category_id
+      if (!categorySpending[catId]) categorySpending[catId] = 0
+      categorySpending[catId] += Number(e.amount)
+    })
+
+    setAiInsights({
+      prediction: {
+        currentTotal: thisMonthTotal,
+        predictedTotal,
+        lastMonthTotal,
+        daysRemaining,
+        dailyAvg
+      },
+      recurring,
+      categorySpending
+    })
+
+  }, [isProMode, normalizeMerchantKey])
+
   const loadExpenses = useCallback(async () => {
     if (!session?.user?.id) return
 
@@ -389,17 +509,25 @@ Rules:
 
     setExpenses(data)
     buildMerchantMemory(data)
+    calculateAIInsights(data, categories)
 
     const withReceipts = data.filter(x => x.receipt_image_url)
     for (const e of withReceipts) {
       await ensureReceiptThumb(e)
     }
-  }, [session, showArchived, search, buildMerchantMemory])
+  }, [session, showArchived, search, buildMerchantMemory, calculateAIInsights, categories])
 
   useEffect(() => {
     if (!session) return
     loadExpenses()
   }, [session, showArchived, loadExpenses])
+
+  // Recalculate insights when expenses or categories change
+  useEffect(() => {
+    if (expenses.length && categories.length) {
+      calculateAIInsights(expenses, categories)
+    }
+  }, [expenses, categories, calculateAIInsights])
 
   const login = async (email, password) => {
     setStatus('')
@@ -539,7 +667,6 @@ Rules:
     await loadExpenses()
   }
 
-  // NEW: Update expense (for inline Edit)
   const updateExpense = async (updatedExpense) => {
     setStatus('')
     
@@ -713,13 +840,22 @@ Rules:
     setSubscriptionStatus('free')
   }
 
-  // NEW: Handle AI commands
+  // NEW FEATURE 1: Handle AI commands with natural language date parsing
   const handleAICommand = (command) => {
     if (command.action === 'add_expense') {
-      // Auto-fill form from AI
       if (command.data.amount) setAmount(String(command.data.amount))
       if (command.data.merchant) setMerchant(command.data.merchant)
-      setStatus('✨ AI filled the form—review and save')
+      
+      // NEW: Natural language date parsing
+      if (command.data.dateHint) {
+        const parsedDate = parseNaturalDate(command.data.dateHint)
+        if (parsedDate) {
+          setSpentAtLocal(parsedDate)
+          setStatus(`✨ AI filled form with date: ${command.data.dateHint}`)
+        }
+      } else {
+        setStatus('✨ AI filled the form—review and save')
+      }
     }
 
     if (command.action === 'search') {
@@ -765,13 +901,13 @@ Rules:
             <h2 style={{ marginTop: 0 }}>Upgrade to Pro</h2>
             <p style={{ fontSize: 18, marginBottom: 20 }}>Unlock advanced AI features for $5/month:</p>
             <ul style={{ lineHeight: 2, marginBottom: 30 }}>
-              <li>✨ Receipt OCR (auto-extract data)</li>
-              <li>📊 Full charts & insights</li>
+              <li>✨ Enhanced receipt OCR (tip/tax breakdown)</li>
+              <li>📊 Spending predictions & forecasts</li>
+              <li>🔄 Recurring expense detection</li>
+              <li>💰 Budget tracking & alerts</li>
               <li>🏷️ Unlimited custom categories</li>
-              <li>💼 Reimbursement tracking</li>
-              <li>🔖 Tags for organization</li>
               <li>📁 Unlimited receipt storage</li>
-              <li>🤖 Advanced AI predictions</li>
+              <li>🤖 Natural language date parsing</li>
             </ul>
             <div style={{ display: 'flex', gap: 10 }}>
               <button onClick={handleStripeCheckout} style={{ flex: 1, padding: '12px 20px', fontSize: 16, backgroundColor: '#4caf50', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer' }}>
@@ -840,6 +976,57 @@ Rules:
               ✕
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {/* NEW: AI Insights Panel (Pro only) */}
+      {isProMode && aiInsights ? (
+        <div style={{
+          marginBottom: 24,
+          padding: 20,
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          borderRadius: 16,
+          color: 'white',
+          boxShadow: '0 8px 24px rgba(102, 126, 234, 0.3)'
+        }}>
+          <h3 style={{ marginTop: 0, marginBottom: 16, fontSize: 20 }}>🤖 AI Financial Insights</h3>
+          
+          {/* Spending Prediction */}
+          <div style={{ marginBottom: 16, padding: 14, background: 'rgba(255,255,255,0.15)', borderRadius: 10 }}>
+            <div style={{ fontSize: 14, opacity: 0.9, marginBottom: 6 }}>📈 This Month Forecast</div>
+            <div style={{ fontSize: 24, fontWeight: 700 }}>${aiInsights.prediction.predictedTotal.toFixed(0)}</div>
+            <div style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>
+              Current: ${aiInsights.prediction.currentTotal.toFixed(0)} • 
+              {aiInsights.prediction.daysRemaining} days left • 
+              ${aiInsights.prediction.dailyAvg.toFixed(0)}/day avg
+            </div>
+            {aiInsights.prediction.lastMonthTotal > 0 && (
+              <div style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>
+                Last month: ${aiInsights.prediction.lastMonthTotal.toFixed(0)}
+                {aiInsights.prediction.predictedTotal > aiInsights.prediction.lastMonthTotal ? 
+                  ` (↑ ${((aiInsights.prediction.predictedTotal / aiInsights.prediction.lastMonthTotal - 1) * 100).toFixed(0)}%)` :
+                  ` (↓ ${((1 - aiInsights.prediction.predictedTotal / aiInsights.prediction.lastMonthTotal) * 100).toFixed(0)}%)`
+                }
+              </div>
+            )}
+          </div>
+
+          {/* Recurring Expenses */}
+          {aiInsights.recurring.length > 0 && (
+            <div style={{ padding: 14, background: 'rgba(255,255,255,0.15)', borderRadius: 10 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>🔄 Recurring Subscriptions Detected:</div>
+              {aiInsights.recurring.slice(0, 3).map((r, i) => (
+                <div key={i} style={{ fontSize: 13, opacity: 0.9, marginBottom: 4 }}>
+                  • {r.merchant}: ${r.amount.toFixed(2)}/{r.frequency}
+                </div>
+              ))}
+              {aiInsights.recurring.length > 3 && (
+                <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
+                  +{aiInsights.recurring.length - 3} more recurring expenses
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -941,6 +1128,69 @@ Rules:
       />
     </div>
   )
+}
+
+/* NEW FEATURE 1: Natural language date parser */
+function parseNaturalDate(text) {
+  const lower = text.toLowerCase().trim()
+  const now = new Date()
+  
+  // Helper to format date
+  const formatDate = (d) => {
+    const pad = (n) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+
+  // Today
+  if (lower.includes('today')) return formatDate(now)
+
+  // Yesterday
+  if (lower.includes('yesterday')) {
+    const d = new Date(now)
+    d.setDate(d.getDate() - 1)
+    return formatDate(d)
+  }
+
+  // X days ago
+  const daysAgoMatch = lower.match(/(\d+)\s*days?\s*ago/)
+  if (daysAgoMatch) {
+    const days = parseInt(daysAgoMatch[1])
+    const d = new Date(now)
+    d.setDate(d.getDate() - days)
+    return formatDate(d)
+  }
+
+  // Last week
+  if (lower.includes('last week')) {
+    const d = new Date(now)
+    d.setDate(d.getDate() - 7)
+    return formatDate(d)
+  }
+
+  // Last month
+  if (lower.includes('last month')) {
+    const d = new Date(now)
+    d.setMonth(d.getMonth() - 1)
+    return formatDate(d)
+  }
+
+  // Specific day: "last tuesday", "monday", etc.
+  const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+  for (let i = 0; i < dayNames.length; i++) {
+    if (lower.includes(dayNames[i])) {
+      const targetDay = i
+      const currentDay = now.getDay()
+      let daysBack = currentDay - targetDay
+      if (daysBack <= 0) daysBack += 7 // Last occurrence
+      if (lower.includes('last')) daysBack += 7
+      
+      const d = new Date(now)
+      d.setDate(d.getDate() - daysBack)
+      return formatDate(d)
+    }
+  }
+
+  return null // Could not parse
 }
 
 /* helpers */
