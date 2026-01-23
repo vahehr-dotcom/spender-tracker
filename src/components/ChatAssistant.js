@@ -5,7 +5,7 @@ export default function ChatAssistant({
   categories, 
   isProMode, 
   onUpgradeToPro,
-  onAICommand // NEW: callback for AI to execute commands (add, edit, search, export)
+  onAICommand
 }) {
   const [aiInput, setAiInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
@@ -108,6 +108,18 @@ export default function ChatAssistant({
     setIsThinking(true)
     setLastResponse('')
 
+    // FIRST: Try to parse and execute command BEFORE calling AI
+    if (onAICommand) {
+      const commandExecuted = parseAndExecuteCommand(userMessage)
+      if (commandExecuted) {
+        setIsThinking(false)
+        setLastResponse('✓ Command executed—check the form below!')
+        speak('Done! Check the form below to review and save.')
+        return
+      }
+    }
+
+    // If no command detected, proceed with AI conversation
     try {
       const expenseData = expenses.map(e => ({
         id: e.id,
@@ -137,12 +149,6 @@ Communication style:
 - Natural, flowing language (you're speaking, not writing)
 - Focused responses (60-120 words)
 - Follow up with relevant questions/suggestions when appropriate
-
-When the user asks to:
-- Add/create expense: Extract details, confirm, then respond with confirmation
-- Edit expense: Identify which expense, ask for changes
-- Show/filter expenses: List matching expenses clearly
-- Export data: Acknowledge and explain what will be exported
 
 Pro features available: Deep analysis, spending trends, predictions, tax optimization.`
         : `You are a helpful AI expense assistant. You can answer basic questions about spending.
@@ -187,11 +193,6 @@ Basic features: View expenses, search by merchant/date, simple totals.`
       setLastResponse(aiMessage)
       speak(aiMessage)
 
-      // Parse AI response for commands (add, edit, search, export)
-      if (onAICommand) {
-        parseAndExecuteCommand(userMessage, aiMessage)
-      }
-
     } catch (err) {
       console.error('AI error:', err)
       const errorMsg = `I apologize—I'm having trouble right now. Please try again.`
@@ -202,46 +203,75 @@ Basic features: View expenses, search by merchant/date, simple totals.`
     }
   }
 
-  const parseAndExecuteCommand = (userMsg, aiMsg) => {
+  const parseAndExecuteCommand = (userMsg) => {
     const lowerUser = userMsg.toLowerCase()
-    const lowerAI = aiMsg.toLowerCase()
 
-    // Detect: "add expense", "create expense", "I spent..."
-    if (lowerUser.includes('add') || lowerUser.includes('create') || lowerUser.includes('spent')) {
-      // Parse amount and merchant from user message
+    // Detect: "add expense", "create expense", "spent", "bought"
+    if (lowerUser.includes('add') || lowerUser.includes('create') || lowerUser.includes('spent') || lowerUser.includes('bought')) {
+      // Parse amount
       const amountMatch = userMsg.match(/(\d+\.?\d*)/)
       const amount = amountMatch ? parseFloat(amountMatch[1]) : null
 
+      // Parse merchant (look for "at X" pattern)
       let merchant = ''
-      const atMatch = userMsg.match(/at\s+([a-z0-9\s]+)/i)
+      const atMatch = userMsg.match(/at\s+([a-z0-9\s]+?)(?:\s+yesterday|\s+today|\s+last|\s+\d+\s+days|\s*$)/i)
       if (atMatch) {
         merchant = atMatch[1].trim()
       }
 
+      // Parse date hint (yesterday, today, last week, etc.)
+      let dateHint = null
+      if (lowerUser.includes('yesterday')) dateHint = 'yesterday'
+      else if (lowerUser.includes('today')) dateHint = 'today'
+      else if (lowerUser.match(/(\d+)\s*days?\s*ago/)) {
+        const match = lowerUser.match(/(\d+)\s*days?\s*ago/)
+        dateHint = `${match[1]} days ago`
+      }
+      else if (lowerUser.includes('last week')) dateHint = 'last week'
+      else if (lowerUser.includes('last month')) dateHint = 'last month'
+      else if (lowerUser.includes('last monday')) dateHint = 'last monday'
+      else if (lowerUser.includes('last tuesday')) dateHint = 'last tuesday'
+      else if (lowerUser.includes('last wednesday')) dateHint = 'last wednesday'
+      else if (lowerUser.includes('last thursday')) dateHint = 'last thursday'
+      else if (lowerUser.includes('last friday')) dateHint = 'last friday'
+      else if (lowerUser.includes('last saturday')) dateHint = 'last saturday'
+      else if (lowerUser.includes('last sunday')) dateHint = 'last sunday'
+      else if (lowerUser.includes('monday')) dateHint = 'monday'
+      else if (lowerUser.includes('tuesday')) dateHint = 'tuesday'
+      else if (lowerUser.includes('wednesday')) dateHint = 'wednesday'
+      else if (lowerUser.includes('thursday')) dateHint = 'thursday'
+      else if (lowerUser.includes('friday')) dateHint = 'friday'
+      else if (lowerUser.includes('saturday')) dateHint = 'saturday'
+      else if (lowerUser.includes('sunday')) dateHint = 'sunday'
+
       if (amount && merchant) {
         onAICommand({ 
           action: 'add_expense', 
-          data: { amount, merchant } 
+          data: { amount, merchant, dateHint } 
         })
+        return true // Command executed
       }
     }
 
     // Detect: "show receipts", "filter by", "search for"
     if (lowerUser.includes('show') || lowerUser.includes('filter') || lowerUser.includes('search')) {
-      // Extract search term
       const searchTermMatch = userMsg.match(/(receipts?|expenses?)\s+(from|for|at)\s+([a-z0-9\s]+)/i)
       if (searchTermMatch) {
         onAICommand({
           action: 'search',
           data: { query: searchTermMatch[3].trim() }
         })
+        return true
       }
     }
 
     // Detect: "export", "download"
     if (lowerUser.includes('export') || lowerUser.includes('download')) {
       onAICommand({ action: 'export' })
+      return true
     }
+
+    return false // No command detected
   }
 
   return (
