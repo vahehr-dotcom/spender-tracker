@@ -14,6 +14,7 @@ function App() {
 
   const [categories, setCategories] = useState([])
   const [expenses, setExpenses] = useState([])
+  const [allExpenses, setAllExpenses] = useState([]) // For AI assistant (unfiltered)
 
   const [amount, setAmount] = useState('')
   const [merchant, setMerchant] = useState('')
@@ -508,8 +509,19 @@ Rules:
     }
 
     setExpenses(data)
-    buildMerchantMemory(data)
-    calculateAIInsights(data, categories)
+
+    // Load ALL expenses for AI (no filters)
+    const { data: allData } = await supabase
+      .from('expenses')
+      .select('id, amount, merchant, payment_method, spent_at, created_at, category_id, receipt_image_url, is_tax_deductible, is_reimbursable, employer_or_client, notes, archived, tags, location')
+      .order('spent_at', { ascending: false })
+      .order('created_at', { ascending: false })
+
+    if (allData) {
+      setAllExpenses(allData)
+      buildMerchantMemory(allData)
+      calculateAIInsights(allData, categories)
+    }
 
     const withReceipts = data.filter(x => x.receipt_image_url)
     for (const e of withReceipts) {
@@ -524,10 +536,10 @@ Rules:
 
   // Recalculate insights when expenses or categories change
   useEffect(() => {
-    if (expenses.length && categories.length) {
-      calculateAIInsights(expenses, categories)
+    if (allExpenses.length && categories.length) {
+      calculateAIInsights(allExpenses, categories)
     }
-  }, [expenses, categories, calculateAIInsights])
+  }, [allExpenses, categories, calculateAIInsights])
 
   const login = async (email, password) => {
     setStatus('')
@@ -1032,7 +1044,7 @@ Rules:
 
       {/* AI-FIRST INTERFACE */}
       <ChatAssistant
-        expenses={expenses}
+        expenses={allExpenses}
         categories={categories}
         isProMode={isProMode}
         onUpgradeToPro={upgradeToPro}
