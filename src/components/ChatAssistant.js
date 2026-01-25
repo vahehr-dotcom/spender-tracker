@@ -116,7 +116,9 @@ export default function ChatAssistant({
 
     setIsThinking(true);
 
-    // Try command parsing first
+    // IMPROVED: Smarter command detection
+    // Only execute commands for explicit action phrases
+    // Questions (when, what, how, where, why) should be answered conversationally
     if (onAICommand) {
       const commandExecuted = parseAndExecuteCommand(userMessage);
       if (commandExecuted) {
@@ -128,6 +130,7 @@ export default function ChatAssistant({
       }
     }
 
+    // If no command detected, ask AI conversationally
     // Build expense data
     const expenseData = expenses.map(e => {
       const cat = categories.find(c => c.id === e.category_id);
@@ -238,8 +241,20 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
   const parseAndExecuteCommand = (text) => {
     const lower = text.toLowerCase();
 
-    // Detect add/create expense
-    if (lower.includes('add') || lower.includes('spent') || lower.includes('bought') || lower.includes('create')) {
+    // IMPROVED: Only detect explicit commands, not questions
+    // Questions like "when did I...", "what did I...", "how much..." should NOT trigger commands
+
+    // Detect question words - if present, let AI answer conversationally
+    const questionWords = ['when', 'what', 'where', 'how much', 'how many', 'which', 'why', 'who', 'did i'];
+    const isQuestion = questionWords.some(word => lower.includes(word));
+    
+    if (isQuestion) {
+      return false; // Let AI answer the question
+    }
+
+    // Detect add/create expense (only if explicit action words)
+    if ((lower.includes('add') || lower.includes('spent') || lower.includes('bought') || lower.includes('create')) 
+        && (lower.includes('at') || lower.includes('on') || lower.includes('for'))) {
       const amountMatch = text.match(/\$?(\d+(?:\.\d{2})?)/);
       const amount = amountMatch ? parseFloat(amountMatch[1]) : null;
 
@@ -281,22 +296,23 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
       }
     }
 
-    // Detect search/show
-    if (lower.includes('show') || lower.includes('filter') || lower.includes('find') || lower.includes('search')) {
-      const query = text.replace(/show|filter|find|search|me|my|all|the/gi, '').trim();
+    // Detect explicit show/filter commands (must have "show me" or "filter")
+    if ((lower.includes('show me') || lower.includes('filter') || lower.includes('list')) 
+        && !lower.includes('when') && !lower.includes('what')) {
+      const query = text.replace(/show\s+me|filter|list|my|all|the/gi, '').trim();
       if (query) {
         onAICommand({ action: 'search', data: { query } });
         return true;
       }
     }
 
-    // Detect export
-    if (lower.includes('export') || lower.includes('download')) {
+    // Detect export (explicit)
+    if (lower.includes('export') || lower.includes('download csv')) {
       onAICommand({ action: 'export' });
       return true;
     }
 
-    return false;
+    return false; // No command detected, let AI answer
   };
 
   return (
