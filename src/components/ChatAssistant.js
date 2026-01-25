@@ -12,8 +12,9 @@ export default function ChatAssistant({
   const [isListening, setIsListening] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [lastResponse, setLastResponse] = useState('')
+  const [voiceTranscript, setVoiceTranscript] = useState('') // NEW: Show what AI heard
   const recognitionRef = useRef(null)
-  const audioRef = useRef(null) // For OpenAI audio playback
+  const audioRef = useRef(null)
 
   // Initialize speech recognition
   useEffect(() => {
@@ -27,6 +28,7 @@ export default function ChatAssistant({
 
     recognition.onstart = () => {
       setIsListening(true)
+      setVoiceTranscript('') // Clear previous transcript
     }
 
     recognition.onend = () => {
@@ -35,11 +37,13 @@ export default function ChatAssistant({
 
     recognition.onerror = () => {
       setIsListening(false)
+      setVoiceTranscript('❌ Could not hear clearly')
     }
 
     recognition.onresult = (event) => {
       const text = event?.results?.[0]?.[0]?.transcript || ''
       if (text.trim()) {
+        setVoiceTranscript(text.trim()) // NEW: Display what was heard
         setAiInput(text.trim())
         setTimeout(() => handleAISubmit(text.trim()), 100)
       }
@@ -50,7 +54,7 @@ export default function ChatAssistant({
 
   const startListening = () => {
     if (!recognitionRef.current) return
-    stopSpeaking() // Stop any ongoing speech
+    stopSpeaking()
     try {
       recognitionRef.current.start()
     } catch (err) {
@@ -63,11 +67,10 @@ export default function ChatAssistant({
     recognitionRef.current.stop()
   }
 
-  // NEW: OpenAI TTS with nova voice
   const speak = async (text) => {
     if (!text) return
     
-    stopSpeaking() // Stop any ongoing speech
+    stopSpeaking()
     setIsSpeaking(true)
 
     try {
@@ -145,25 +148,49 @@ export default function ChatAssistant({
 
     // If no command detected, proceed with AI conversation
     try {
-      const expenseData = expenses.map(e => ({
-        id: e.id,
-        merchant: e.merchant,
-        amount: Number(e.amount),
-        date: new Date(e.spent_at).toISOString().split('T')[0],
-        category: categories.find(c => c.id === e.category_id)?.name || 'Other',
-        paymentMethod: e.payment_method,
-        taxDeductible: e.is_tax_deductible,
-        reimbursable: e.is_reimbursable,
-        notes: e.notes
-      }))
+      // NEW: Format expense data with clear, unambiguous dates
+      const expenseData = expenses.map(e => {
+        const spentDate = new Date(e.spent_at)
+        return {
+          id: e.id,
+          merchant: e.merchant,
+          amount: Number(e.amount),
+          spent_at: spentDate.toISOString(), // Full ISO timestamp
+          spent_date: spentDate.toLocaleDateString('en-US', { 
+            weekday: 'long', 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+          }), // Human-readable: "Monday, January 20, 2026"
+          category: categories.find(c => c.id === e.category_id)?.name || 'Other',
+          paymentMethod: e.payment_method,
+          taxDeductible: e.is_tax_deductible,
+          reimbursable: e.is_reimbursable,
+          notes: e.notes
+        }
+      })
+
+      // NEW: Get REAL current date and time
+      const now = new Date()
+      const currentDateTime = now.toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      })
 
       const systemPrompt = isProMode 
         ? `You are an elite AI financial advisor and personal accountant—intelligent, attentive, and always present. You speak with the authority of a trusted wealth advisor.
 
-Current date: ${new Date().toISOString().split('T')[0]}
+**CURRENT DATE AND TIME:** ${currentDateTime}
+
+**IMPORTANT:** When referencing dates from expenses, use the "spent_date" field which shows the human-readable date. Pay close attention to the actual dates in the data.
 
 Client's expense data:
-${JSON.stringify(expenseData, null, 2)}
+${JSON.stringify(expenseData.slice(0, 50), null, 2)}
 
 Communication style:
 - Professional yet warm—private wealth advisor, not chatbot
@@ -172,15 +199,16 @@ Communication style:
 - Context-aware: reference patterns, trends, anomalies
 - Natural, flowing language (you're speaking, not writing)
 - Focused responses (60-120 words)
+- When asked about dates, READ THE DATA CAREFULLY and reference the exact "spent_date" field
 - Follow up with relevant questions/suggestions when appropriate
 
 Pro features available: Deep analysis, spending trends, predictions, tax optimization.`
         : `You are a helpful AI expense assistant. You can answer basic questions about spending.
 
-Current date: ${new Date().toISOString().split('T')[0]}
+**CURRENT DATE AND TIME:** ${currentDateTime}
 
-Expense data:
-${JSON.stringify(expenseData, null, 2)}
+Expense data (recent entries):
+${JSON.stringify(expenseData.slice(0, 20), null, 2)}
 
 Keep responses brief (40-80 words). For advanced analysis, insights, or predictions, mention: "Upgrade to Pro for deep financial analysis."
 
@@ -232,18 +260,15 @@ Basic features: View expenses, search by merchant/date, simple totals.`
 
     // Detect: "add expense", "create expense", "spent", "bought"
     if (lowerUser.includes('add') || lowerUser.includes('create') || lowerUser.includes('spent') || lowerUser.includes('bought')) {
-      // Parse amount
       const amountMatch = userMsg.match(/(\d+\.?\d*)/)
       const amount = amountMatch ? parseFloat(amountMatch[1]) : null
 
-      // Parse merchant (look for "at X" pattern)
       let merchant = ''
       const atMatch = userMsg.match(/at\s+([a-z0-9\s]+?)(?:\s+yesterday|\s+today|\s+last|\s+\d+\s+days|\s*$)/i)
       if (atMatch) {
         merchant = atMatch[1].trim()
       }
 
-      // Parse date hint (yesterday, today, last week, etc.)
       let dateHint = null
       if (lowerUser.includes('yesterday')) dateHint = 'yesterday'
       else if (lowerUser.includes('today')) dateHint = 'today'
@@ -273,11 +298,10 @@ Basic features: View expenses, search by merchant/date, simple totals.`
           action: 'add_expense', 
           data: { amount, merchant, dateHint } 
         })
-        return true // Command executed
+        return true
       }
     }
 
-    // Detect: "show receipts", "filter by", "search for"
     if (lowerUser.includes('show') || lowerUser.includes('filter') || lowerUser.includes('search')) {
       const searchTermMatch = userMsg.match(/(receipts?|expenses?)\s+(from|for|at)\s+([a-z0-9\s]+)/i)
       if (searchTermMatch) {
@@ -289,13 +313,12 @@ Basic features: View expenses, search by merchant/date, simple totals.`
       }
     }
 
-    // Detect: "export", "download"
     if (lowerUser.includes('export') || lowerUser.includes('download')) {
       onAICommand({ action: 'export' })
       return true
     }
 
-    return false // No command detected
+    return false
   }
 
   return (
@@ -305,7 +328,6 @@ Basic features: View expenses, search by merchant/date, simple totals.`
       margin: '0 auto',
       fontFamily: 'system-ui, sans-serif'
     }}>
-      {/* AI Input Interface */}
       <div style={{
         background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
         borderRadius: 16,
@@ -373,6 +395,21 @@ Basic features: View expenses, search by merchant/date, simple totals.`
             {isListening ? '⏸' : '🎤'}
           </button>
         </div>
+
+        {/* NEW: Voice transcript display */}
+        {voiceTranscript && (
+          <div style={{
+            marginTop: 12,
+            padding: '10px 14px',
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.25)',
+            color: 'white',
+            fontSize: 14,
+            fontStyle: 'italic'
+          }}>
+            🎤 You said: "{voiceTranscript}"
+          </div>
+        )}
 
         {/* Status indicators */}
         {(isListening || isThinking || isSpeaking) && (
