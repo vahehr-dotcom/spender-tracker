@@ -1,224 +1,210 @@
-import { useState, useRef, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react';
 
-export default function ChatAssistant({ 
-  expenses, 
-  categories, 
-  isProMode, 
+export default function ChatAssistant({
+  expenses,
+  categories,
+  isProMode,
   onUpgradeToPro,
   onAICommand
 }) {
-  const [aiInput, setAiInput] = useState('')
-  const [isThinking, setIsThinking] = useState(false)
-  const [isListening, setIsListening] = useState(false)
-  const [isSpeaking, setIsSpeaking] = useState(false)
-  const [lastResponse, setLastResponse] = useState('')
-  const [voiceTranscript, setVoiceTranscript] = useState('') // NEW: Show what AI heard
-  const recognitionRef = useRef(null)
-  const audioRef = useRef(null)
+  const [aiInput, setAiInput] = useState('');
+  const [isThinking, setIsThinking] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [lastResponse, setLastResponse] = useState('');
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+
+  const recognitionRef = useRef(null);
+  const audioRef = useRef(null);
 
   // Initialize speech recognition
   useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) return
-
-    const recognition = new SpeechRecognition()
-    recognition.lang = 'en-US'
-    recognition.interimResults = false
-    recognition.continuous = false
-
-    recognition.onstart = () => {
-      setIsListening(true)
-      setVoiceTranscript('') // Clear previous transcript
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      return;
     }
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.continuous = false;
 
-    recognition.onend = () => {
-      setIsListening(false)
-    }
-
-    recognition.onerror = () => {
-      setIsListening(false)
-      setVoiceTranscript('❌ Could not hear clearly')
-    }
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => setIsListening(false);
 
     recognition.onresult = (event) => {
-      const text = event?.results?.[0]?.[0]?.transcript || ''
-      if (text.trim()) {
-        setVoiceTranscript(text.trim()) // NEW: Display what was heard
-        setAiInput(text.trim())
-        setTimeout(() => handleAISubmit(text.trim()), 100)
-      }
-    }
+      const transcript = event.results[0][0].transcript.trim();
+      setVoiceTranscript(transcript);
+      setAiInput(transcript);
+      setTimeout(() => handleAISubmit(transcript), 100);
+    };
 
-    recognitionRef.current = recognition
-  }, [expenses, categories])
+    recognitionRef.current = recognition;
+  }, []);
 
   const startListening = () => {
-    if (!recognitionRef.current) return
-    stopSpeaking()
-    try {
-      recognitionRef.current.start()
-    } catch (err) {
-      console.error('Recognition error:', err)
+    if (recognitionRef.current && !isListening) {
+      setVoiceTranscript('');
+      recognitionRef.current.start();
     }
-  }
+  };
 
   const stopListening = () => {
-    if (!recognitionRef.current) return
-    recognitionRef.current.stop()
-  }
+    if (recognitionRef.current && isListening) {
+      recognitionRef.current.stop();
+    }
+  };
 
+  // OpenAI TTS (nova voice)
   const speak = async (text) => {
-    if (!text) return
-    
-    stopSpeaking()
-    setIsSpeaking(true)
-
     try {
+      setIsSpeaking(true);
       const response = await fetch('https://api.openai.com/v1/audio/speech', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
+          'Authorization': `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`,
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           model: 'tts-1',
           voice: 'nova',
-          input: text,
-          speed: 1.0
+          input: text
         })
-      })
+      });
 
-      if (!response.ok) {
-        throw new Error('TTS failed')
+      if (!response.ok) throw new Error('TTS failed');
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
       }
 
-      const audioBlob = await response.blob()
-      const audioUrl = URL.createObjectURL(audioBlob)
-      
-      const audio = new Audio(audioUrl)
-      audioRef.current = audio
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
 
       audio.onended = () => {
-        setIsSpeaking(false)
-        URL.revokeObjectURL(audioUrl)
-        audioRef.current = null
-      }
+        setIsSpeaking(false);
+        URL.revokeObjectURL(audioUrl);
+      };
 
       audio.onerror = () => {
-        setIsSpeaking(false)
-        URL.revokeObjectURL(audioUrl)
-        audioRef.current = null
-      }
+        setIsSpeaking(false);
+        URL.revokeObjectURL(audioUrl);
+      };
 
-      await audio.play()
-
-    } catch (err) {
-      console.error('TTS error:', err)
-      setIsSpeaking(false)
+      await audio.play();
+    } catch (error) {
+      console.error('TTS error:', error);
+      setIsSpeaking(false);
     }
-  }
+  };
 
   const stopSpeaking = () => {
     if (audioRef.current) {
-      audioRef.current.pause()
-      audioRef.current.currentTime = 0
-      audioRef.current = null
+      audioRef.current.pause();
+      audioRef.current = null;
+      setIsSpeaking(false);
     }
-    setIsSpeaking(false)
-  }
+  };
 
   const handleAISubmit = async (voiceInput = null) => {
-    const userMessage = voiceInput || aiInput.trim()
-    if (!userMessage) return
+    const userMessage = voiceInput || aiInput.trim();
+    if (!userMessage) return;
 
-    setAiInput('')
-    setIsThinking(true)
-    setLastResponse('')
+    setIsThinking(true);
 
-    // FIRST: Try to parse and execute command BEFORE calling AI
+    // Try command parsing first
     if (onAICommand) {
-      const commandExecuted = parseAndExecuteCommand(userMessage)
+      const commandExecuted = parseAndExecuteCommand(userMessage);
       if (commandExecuted) {
-        setIsThinking(false)
-        setLastResponse('✓ Command executed—check the form below!')
-        speak('Done! Check the form below to review and save.')
-        return
+        setLastResponse('✓ Command executed—check the form below!');
+        speak('Command executed. Check the form below.');
+        setIsThinking(false);
+        setAiInput('');
+        return;
       }
     }
 
-    // If no command detected, proceed with AI conversation
+    // Build expense data
+    const expenseData = expenses.map(e => {
+      const cat = categories.find(c => c.id === e.category_id);
+      const spentDate = new Date(e.spent_at);
+      return {
+        id: e.id,
+        merchant: e.merchant,
+        amount: Number(e.amount),
+        spent_at: e.spent_at,
+        spent_date: spentDate.toLocaleDateString('en-US', { 
+          weekday: 'short', 
+          year: 'numeric', 
+          month: 'short', 
+          day: 'numeric' 
+        }),
+        category: cat ? cat.name : 'Other',
+        paymentMethod: e.payment_method,
+        taxDeductible: e.is_tax_deductible,
+        reimbursable: e.is_reimbursable,
+        notes: e.notes
+      };
+    });
+
+    // Get current date/time
+    const now = new Date();
+    const currentDate = now.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+    const currentTime = now.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+
+    // Updated system prompt with warm personality
+    const systemPrompt = isProMode
+      ? `You are Nova, a warm and professional financial advisor. When users greet you (e.g., "How are you?"), respond naturally and warmly (e.g., "I'm doing well! How can I help you today?"). Never say "I'm just a program" or "I don't have feelings"—be conversational and friendly.
+
+You have access to the user's complete expense history and provide elite-level financial insights. You can:
+- Analyze spending patterns and trends
+- Identify opportunities for savings
+- Suggest budget optimizations
+- Predict future expenses
+- Detect recurring charges
+- Provide tax and reimbursement guidance
+- Offer personalized financial advice
+
+Current date: ${currentDate}
+Current time: ${currentTime}
+
+User's expenses:
+${JSON.stringify(expenseData, null, 2)}
+
+Be concise, insightful, and actionable. Use your full analytical capabilities.`
+      : `You are Nova, a warm and friendly expense assistant. When users greet you (e.g., "How are you?"), respond naturally and warmly (e.g., "I'm doing well! How can I help you today?"). Never say "I'm just a program" or "I don't have feelings"—be conversational and approachable.
+
+You help users track expenses and answer basic questions. You can:
+- Show expenses by date, merchant, or category
+- Calculate totals and averages
+- Answer simple spending questions
+
+Current date: ${currentDate}
+Current time: ${currentTime}
+
+User's expenses:
+${JSON.stringify(expenseData, null, 2)}
+
+Keep responses short and helpful. For deeper insights, gently mention Pro features.`;
+
     try {
-      // NEW: Format expense data with clear, unambiguous dates
-      const expenseData = expenses.map(e => {
-        const spentDate = new Date(e.spent_at)
-        return {
-          id: e.id,
-          merchant: e.merchant,
-          amount: Number(e.amount),
-          spent_at: spentDate.toISOString(), // Full ISO timestamp
-          spent_date: spentDate.toLocaleDateString('en-US', { 
-            weekday: 'long', 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric' 
-          }), // Human-readable: "Monday, January 20, 2026"
-          category: categories.find(c => c.id === e.category_id)?.name || 'Other',
-          paymentMethod: e.payment_method,
-          taxDeductible: e.is_tax_deductible,
-          reimbursable: e.is_reimbursable,
-          notes: e.notes
-        }
-      })
-
-      // NEW: Get REAL current date and time
-      const now = new Date()
-      const currentDateTime = now.toLocaleString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true
-      })
-
-      const systemPrompt = isProMode 
-        ? `You are an elite AI financial advisor and personal accountant—intelligent, attentive, and always present. You speak with the authority of a trusted wealth advisor.
-
-**CURRENT DATE AND TIME:** ${currentDateTime}
-
-**IMPORTANT:** When referencing dates from expenses, use the "spent_date" field which shows the human-readable date. Pay close attention to the actual dates in the data.
-
-Client's expense data:
-${JSON.stringify(expenseData.slice(0, 50), null, 2)}
-
-Communication style:
-- Professional yet warm—private wealth advisor, not chatbot
-- Proactive: anticipate needs, offer insights beyond what's asked
-- Precise with numbers: include amounts, dates, merchant names
-- Context-aware: reference patterns, trends, anomalies
-- Natural, flowing language (you're speaking, not writing)
-- Focused responses (60-120 words)
-- When asked about dates, READ THE DATA CAREFULLY and reference the exact "spent_date" field
-- Follow up with relevant questions/suggestions when appropriate
-
-Pro features available: Deep analysis, spending trends, predictions, tax optimization.`
-        : `You are a helpful AI expense assistant. You can answer basic questions about spending.
-
-**CURRENT DATE AND TIME:** ${currentDateTime}
-
-Expense data (recent entries):
-${JSON.stringify(expenseData.slice(0, 20), null, 2)}
-
-Keep responses brief (40-80 words). For advanced analysis, insights, or predictions, mention: "Upgrade to Pro for deep financial analysis."
-
-Basic features: View expenses, search by merchant/date, simple totals.`
-
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
+          'Authorization': `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`,
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           model: 'gpt-4o',
@@ -229,279 +215,263 @@ Basic features: View expenses, search by merchant/date, simple totals.`
           max_tokens: isProMode ? 400 : 200,
           temperature: 0.7
         })
-      })
+      });
 
-      if (!response.ok) {
-        throw new Error(`Unable to process request`)
-      }
+      if (!response.ok) throw new Error('OpenAI API error');
 
-      const data = await response.json()
-      const aiMessage = data?.choices?.[0]?.message?.content?.trim()
+      const data = await response.json();
+      const aiMessage = data.choices[0].message.content;
 
-      if (!aiMessage) {
-        throw new Error('No response received')
-      }
-
-      setLastResponse(aiMessage)
-      speak(aiMessage)
-
-    } catch (err) {
-      console.error('AI error:', err)
-      const errorMsg = `I apologize—I'm having trouble right now. Please try again.`
-      setLastResponse(errorMsg)
-      speak(errorMsg)
+      setLastResponse(aiMessage);
+      speak(aiMessage);
+    } catch (error) {
+      console.error('AI error:', error);
+      const errorMsg = 'Sorry, I encountered an error. Please try again.';
+      setLastResponse(errorMsg);
+      speak(errorMsg);
     } finally {
-      setIsThinking(false)
+      setIsThinking(false);
+      setAiInput('');
     }
-  }
+  };
 
-  const parseAndExecuteCommand = (userMsg) => {
-    const lowerUser = userMsg.toLowerCase()
+  const parseAndExecuteCommand = (text) => {
+    const lower = text.toLowerCase();
 
-    // Detect: "add expense", "create expense", "spent", "bought"
-    if (lowerUser.includes('add') || lowerUser.includes('create') || lowerUser.includes('spent') || lowerUser.includes('bought')) {
-      const amountMatch = userMsg.match(/(\d+\.?\d*)/)
-      const amount = amountMatch ? parseFloat(amountMatch[1]) : null
+    // Detect add/create expense
+    if (lower.includes('add') || lower.includes('spent') || lower.includes('bought') || lower.includes('create')) {
+      const amountMatch = text.match(/\$?(\d+(?:\.\d{2})?)/);
+      const amount = amountMatch ? parseFloat(amountMatch[1]) : null;
 
-      let merchant = ''
-      const atMatch = userMsg.match(/at\s+([a-z0-9\s]+?)(?:\s+yesterday|\s+today|\s+last|\s+\d+\s+days|\s*$)/i)
+      // Extract merchant (stop at date keywords)
+      const dateKeywords = ['yesterday', 'today', 'ago', 'last', 'week', 'month', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+      let merchant = null;
+      const atMatch = text.match(/at\s+([a-zA-Z0-9\s]+)/i);
       if (atMatch) {
-        merchant = atMatch[1].trim()
+        const words = atMatch[1].trim().split(/\s+/);
+        const filtered = [];
+        for (const word of words) {
+          if (dateKeywords.includes(word.toLowerCase())) break;
+          filtered.push(word);
+        }
+        merchant = filtered.join(' ').trim();
       }
 
-      let dateHint = null
-      if (lowerUser.includes('yesterday')) dateHint = 'yesterday'
-      else if (lowerUser.includes('today')) dateHint = 'today'
-      else if (lowerUser.match(/(\d+)\s*days?\s*ago/)) {
-        const match = lowerUser.match(/(\d+)\s*days?\s*ago/)
-        dateHint = `${match[1]} days ago`
+      // Extract date hint
+      let dateHint = 'today';
+      if (lower.includes('yesterday')) dateHint = 'yesterday';
+      else if (lower.includes('today')) dateHint = 'today';
+      else {
+        const daysAgoMatch = lower.match(/(\d+)\s+days?\s+ago/);
+        if (daysAgoMatch) dateHint = `${daysAgoMatch[1]} days ago`;
+        else if (lower.includes('last week')) dateHint = 'last week';
+        else if (lower.includes('last month')) dateHint = 'last month';
+        else {
+          const dayMatch = lower.match(/last\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
+          if (dayMatch) dateHint = `last ${dayMatch[1]}`;
+        }
       }
-      else if (lowerUser.includes('last week')) dateHint = 'last week'
-      else if (lowerUser.includes('last month')) dateHint = 'last month'
-      else if (lowerUser.includes('last monday')) dateHint = 'last monday'
-      else if (lowerUser.includes('last tuesday')) dateHint = 'last tuesday'
-      else if (lowerUser.includes('last wednesday')) dateHint = 'last wednesday'
-      else if (lowerUser.includes('last thursday')) dateHint = 'last thursday'
-      else if (lowerUser.includes('last friday')) dateHint = 'last friday'
-      else if (lowerUser.includes('last saturday')) dateHint = 'last saturday'
-      else if (lowerUser.includes('last sunday')) dateHint = 'last sunday'
-      else if (lowerUser.includes('monday')) dateHint = 'monday'
-      else if (lowerUser.includes('tuesday')) dateHint = 'tuesday'
-      else if (lowerUser.includes('wednesday')) dateHint = 'wednesday'
-      else if (lowerUser.includes('thursday')) dateHint = 'thursday'
-      else if (lowerUser.includes('friday')) dateHint = 'friday'
-      else if (lowerUser.includes('saturday')) dateHint = 'saturday'
-      else if (lowerUser.includes('sunday')) dateHint = 'sunday'
 
       if (amount && merchant) {
-        onAICommand({ 
-          action: 'add_expense', 
-          data: { amount, merchant, dateHint } 
-        })
-        return true
-      }
-    }
-
-    if (lowerUser.includes('show') || lowerUser.includes('filter') || lowerUser.includes('search')) {
-      const searchTermMatch = userMsg.match(/(receipts?|expenses?)\s+(from|for|at)\s+([a-z0-9\s]+)/i)
-      if (searchTermMatch) {
         onAICommand({
-          action: 'search',
-          data: { query: searchTermMatch[3].trim() }
-        })
-        return true
+          action: 'add_expense',
+          data: { amount, merchant, dateHint }
+        });
+        return true;
       }
     }
 
-    if (lowerUser.includes('export') || lowerUser.includes('download')) {
-      onAICommand({ action: 'export' })
-      return true
+    // Detect search/show
+    if (lower.includes('show') || lower.includes('filter') || lower.includes('find') || lower.includes('search')) {
+      const query = text.replace(/show|filter|find|search|me|my|all|the/gi, '').trim();
+      if (query) {
+        onAICommand({ action: 'search', data: { query } });
+        return true;
+      }
     }
 
-    return false
-  }
+    // Detect export
+    if (lower.includes('export') || lower.includes('download')) {
+      onAICommand({ action: 'export' });
+      return true;
+    }
+
+    return false;
+  };
 
   return (
-    <div style={{ 
-      padding: '24px 0',
-      maxWidth: 600,
-      margin: '0 auto',
-      fontFamily: 'system-ui, sans-serif'
+    <div style={{
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      borderRadius: '16px',
+      padding: '24px',
+      marginBottom: '24px',
+      color: 'white',
+      boxShadow: '0 8px 32px rgba(102, 126, 234, 0.3)'
     }}>
-      <div style={{
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        borderRadius: 16,
-        padding: 24,
-        boxShadow: '0 8px 32px rgba(102, 126, 234, 0.3)',
-        marginBottom: 20
-      }}>
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: 12,
-          marginBottom: 16
-        }}>
-          <div style={{ fontSize: 32 }}>🧠</div>
+      {/* Header */}
+      <div style={{ marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+          <span style={{ fontSize: '32px' }}>🤖</span>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: 'white' }}>
-              Your AI Assistant
-            </div>
-            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)' }}>
-              {isProMode ? 'Elite advisor mode • Always ready' : 'Basic mode • Upgrade for deep insights'}
-            </div>
+            <h2 style={{ margin: 0, fontSize: '24px', fontWeight: '600' }}>Nova AI Assistant</h2>
+            <p style={{ margin: 0, fontSize: '14px', opacity: 0.9 }}>
+              {isProMode ? 'Elite Financial Advisor Mode' : 'Basic Expense Assistant'}
+            </p>
           </div>
         </div>
+      </div>
 
-        {/* Input + Voice */}
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <input
-            type="text"
-            value={aiInput}
-            onChange={(e) => setAiInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleAISubmit()
-            }}
-            placeholder="How can I help you today?"
-            disabled={isThinking || isListening}
-            style={{
-              flex: 1,
-              padding: '14px 18px',
-              fontSize: 16,
-              border: 'none',
-              borderRadius: 12,
-              backgroundColor: 'white',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-              outline: 'none'
-            }}
-          />
+      {/* Input Area */}
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+        <input
+          type="text"
+          value={aiInput}
+          onChange={(e) => setAiInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleAISubmit()}
+          placeholder="How can I help you today?"
+          style={{
+            flex: 1,
+            padding: '14px 18px',
+            borderRadius: '12px',
+            border: 'none',
+            fontSize: '16px',
+            outline: 'none'
+          }}
+        />
+        <button
+          onClick={isListening ? stopListening : startListening}
+          disabled={isThinking || isSpeaking}
+          style={{
+            padding: '14px 20px',
+            borderRadius: '12px',
+            border: 'none',
+            background: isListening ? '#ef4444' : 'white',
+            color: isListening ? 'white' : '#667eea',
+            fontSize: '20px',
+            cursor: 'pointer',
+            fontWeight: '600',
+            minWidth: '60px'
+          }}
+        >
+          {isListening ? '⏹' : '🎤'}
+        </button>
+      </div>
+
+      {/* Voice Transcript */}
+      {voiceTranscript && (
+        <div style={{
+          background: 'rgba(255,255,255,0.2)',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          marginBottom: '16px',
+          fontSize: '14px'
+        }}>
+          🎤 <strong>You said:</strong> "{voiceTranscript}"
+        </div>
+      )}
+
+      {/* Status Indicators */}
+      {isListening && (
+        <div style={{
+          background: 'rgba(239, 68, 68, 0.2)',
+          padding: '12px',
+          borderRadius: '8px',
+          marginBottom: '12px',
+          textAlign: 'center',
+          fontWeight: '600'
+        }}>
+          🎤 Listening...
+        </div>
+      )}
+
+      {isThinking && (
+        <div style={{
+          background: 'rgba(255,255,255,0.2)',
+          padding: '12px',
+          borderRadius: '8px',
+          marginBottom: '12px',
+          textAlign: 'center',
+          fontWeight: '600'
+        }}>
+          🤔 Thinking...
+        </div>
+      )}
+
+      {isSpeaking && (
+        <div style={{
+          background: 'rgba(34, 197, 94, 0.2)',
+          padding: '12px',
+          borderRadius: '8px',
+          marginBottom: '12px',
+          textAlign: 'center',
+          fontWeight: '600',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '12px'
+        }}>
+          🔊 Nova is speaking...
           <button
-            onClick={isListening ? stopListening : startListening}
-            disabled={isThinking}
+            onClick={stopSpeaking}
             style={{
-              padding: '14px 20px',
-              fontSize: 20,
+              padding: '6px 12px',
+              borderRadius: '6px',
               border: 'none',
-              borderRadius: 12,
-              background: isListening ? '#ff5252' : 'white',
-              color: isListening ? 'white' : '#667eea',
-              cursor: isThinking ? 'not-allowed' : 'pointer',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-              transition: 'transform 0.2s',
-              opacity: isThinking ? 0.5 : 1
+              background: 'white',
+              color: '#667eea',
+              fontSize: '12px',
+              cursor: 'pointer',
+              fontWeight: '600'
             }}
-            onMouseOver={e => !isThinking && (e.target.style.transform = 'scale(1.05)')}
-            onMouseOut={e => e.target.style.transform = 'scale(1)'}
           >
-            {isListening ? '⏸' : '🎤'}
+            Stop
           </button>
         </div>
+      )}
 
-        {/* NEW: Voice transcript display */}
-        {voiceTranscript && (
-          <div style={{
-            marginTop: 12,
-            padding: '10px 14px',
-            borderRadius: 10,
-            background: 'rgba(255,255,255,0.25)',
-            color: 'white',
-            fontSize: 14,
-            fontStyle: 'italic'
-          }}>
-            🎤 You said: "{voiceTranscript}"
-          </div>
-        )}
+      {/* Last Response */}
+      {lastResponse && (
+        <div style={{
+          background: 'rgba(255,255,255,0.15)',
+          padding: '16px',
+          borderRadius: '12px',
+          fontSize: '15px',
+          lineHeight: '1.6',
+          whiteSpace: 'pre-wrap'
+        }}>
+          <strong>Nova:</strong> {lastResponse}
+        </div>
+      )}
 
-        {/* Status indicators */}
-        {(isListening || isThinking || isSpeaking) && (
-          <div style={{
-            marginTop: 12,
-            padding: '10px 14px',
-            borderRadius: 10,
-            background: 'rgba(255,255,255,0.2)',
-            color: 'white',
-            fontSize: 14,
-            fontWeight: 600,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8
-          }}>
-            {isListening && <>🎙️ Listening...</>}
-            {isThinking && <>⏳ Thinking...</>}
-            {isSpeaking && (
-              <>
-                🔊 Speaking...
-                <button
-                  onClick={stopSpeaking}
-                  style={{
-                    marginLeft: 'auto',
-                    padding: '4px 12px',
-                    fontSize: 12,
-                    border: 'none',
-                    borderRadius: 6,
-                    background: 'rgba(0,0,0,0.2)',
-                    color: 'white',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Stop
-                </button>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Last AI Response */}
-        {lastResponse && (
-          <div style={{
-            marginTop: 16,
-            padding: 16,
-            borderRadius: 12,
-            background: 'rgba(255,255,255,0.95)',
-            fontSize: 15,
-            lineHeight: 1.6,
-            color: '#333'
-          }}>
-            <div style={{ fontWeight: 700, marginBottom: 8, color: '#667eea' }}>
-              AI Response:
-            </div>
-            {lastResponse}
-          </div>
-        )}
-
-        {/* Pro teaser for free users */}
-        {!isProMode && (
-          <div style={{
-            marginTop: 16,
-            padding: '12px 16px',
-            borderRadius: 10,
-            background: 'rgba(255,255,255,0.15)',
-            color: 'white',
-            fontSize: 13,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12
-          }}>
-            <span>✨ Get deep insights, trends, predictions</span>
-            <button
-              onClick={onUpgradeToPro}
-              style={{
-                padding: '6px 14px',
-                fontSize: 12,
-                fontWeight: 700,
-                border: 'none',
-                borderRadius: 8,
-                background: 'white',
-                color: '#667eea',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              Upgrade
-            </button>
-          </div>
-        )}
-      </div>
+      {/* Pro Teaser (Free users only) */}
+      {!isProMode && (
+        <div style={{
+          marginTop: '16px',
+          padding: '12px',
+          background: 'rgba(255,255,255,0.1)',
+          borderRadius: '8px',
+          fontSize: '13px',
+          textAlign: 'center'
+        }}>
+          💎 Upgrade to Pro for deeper insights, spending predictions, and elite financial advice
+          <button
+            onClick={onUpgradeToPro}
+            style={{
+              marginLeft: '12px',
+              padding: '6px 16px',
+              borderRadius: '6px',
+              border: 'none',
+              background: 'white',
+              color: '#667eea',
+              fontSize: '13px',
+              cursor: 'pointer',
+              fontWeight: '600'
+            }}
+          >
+            Upgrade
+          </button>
+        </div>
+      )}
     </div>
-  )
+  );
 }
