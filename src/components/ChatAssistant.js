@@ -16,6 +16,15 @@ export default function ChatAssistant({
 
   const recognitionRef = useRef(null);
   const audioRef = useRef(null);
+  
+  // FIX: Store latest expenses/categories in refs so handleAISubmit always has current data
+  const expensesRef = useRef(expenses);
+  const categoriesRef = useRef(categories);
+
+  useEffect(() => {
+    expensesRef.current = expenses;
+    categoriesRef.current = categories;
+  }, [expenses, categories]);
 
   // DEBUG: Log what we're receiving
   useEffect(() => {
@@ -126,9 +135,11 @@ export default function ChatAssistant({
 
     setIsThinking(true);
 
+    // FIX: Use refs to get CURRENT data, not stale closure
+    const currentExpenses = expensesRef.current || [];
+    const currentCategories = categoriesRef.current || [];
+
     // IMPROVED: Smarter command detection
-    // Only execute commands for explicit action phrases
-    // Questions (when, what, how, where, why) should be answered conversationally
     if (onAICommand) {
       const commandExecuted = parseAndExecuteCommand(userMessage);
       if (commandExecuted) {
@@ -141,12 +152,11 @@ export default function ChatAssistant({
     }
 
     // DEBUG: Check if expenses exist before building data
-    console.log('Building expense data from:', expenses?.length || 0, 'expenses');
+    console.log('Building expense data from:', currentExpenses.length, 'expenses');
 
-    // If no command detected, ask AI conversationally
-    // Build expense data
-    const expenseData = (expenses || []).map(e => {
-      const cat = (categories || []).find(c => c.id === e.category_id);
+    // Build expense data from CURRENT refs
+    const expenseData = currentExpenses.map(e => {
+      const cat = currentCategories.find(c => c.id === e.category_id);
       const spentDate = new Date(e.spent_at);
       return {
         id: e.id,
@@ -258,9 +268,6 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
 
   const parseAndExecuteCommand = (text) => {
     const lower = text.toLowerCase();
-
-    // IMPROVED: Only detect explicit commands, not questions
-    // Questions like "when did I...", "what did I...", "how much..." should NOT trigger commands
 
     // Detect question words - if present, let AI answer conversationally
     const questionWords = ['when', 'what', 'where', 'how much', 'how many', 'which', 'why', 'who', 'did i'];
