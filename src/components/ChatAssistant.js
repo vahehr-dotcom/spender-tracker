@@ -17,6 +17,16 @@ export default function ChatAssistant({
   const recognitionRef = useRef(null);
   const audioRef = useRef(null);
 
+  // DEBUG: Log what we're receiving
+  useEffect(() => {
+    console.log('ChatAssistant received:', {
+      expenseCount: expenses?.length || 0,
+      categoryCount: categories?.length || 0,
+      sampleExpense: expenses?.[0],
+      sampleCategory: categories?.[0]
+    });
+  }, [expenses, categories]);
+
   // Initialize speech recognition
   useEffect(() => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -130,10 +140,13 @@ export default function ChatAssistant({
       }
     }
 
+    // DEBUG: Check if expenses exist before building data
+    console.log('Building expense data from:', expenses?.length || 0, 'expenses');
+
     // If no command detected, ask AI conversationally
     // Build expense data
-    const expenseData = expenses.map(e => {
-      const cat = categories.find(c => c.id === e.category_id);
+    const expenseData = (expenses || []).map(e => {
+      const cat = (categories || []).find(c => c.id === e.category_id);
       const spentDate = new Date(e.spent_at);
       return {
         id: e.id,
@@ -153,6 +166,9 @@ export default function ChatAssistant({
         notes: e.notes
       };
     });
+
+    console.log('Formatted expense data:', expenseData.length, 'items');
+    console.log('Sample formatted expense:', expenseData[0]);
 
     // Get current date/time
     const now = new Date();
@@ -201,6 +217,8 @@ User's expenses:
 ${JSON.stringify(expenseData, null, 2)}
 
 Keep responses short and helpful. For deeper insights, gently mention Pro features.`;
+
+    console.log('Sending to OpenAI with', expenseData.length, 'expenses');
 
     try {
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -324,6 +342,18 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
       color: 'white',
       boxShadow: '0 8px 32px rgba(102, 126, 234, 0.3)'
     }}>
+      {/* DEBUG PANEL */}
+      <div style={{
+        background: 'rgba(255,255,255,0.1)',
+        padding: '8px 12px',
+        borderRadius: '8px',
+        marginBottom: '16px',
+        fontSize: '12px',
+        fontFamily: 'monospace'
+      }}>
+        🐛 Debug: {expenses?.length || 0} expenses, {categories?.length || 0} categories
+      </div>
+
       {/* Header */}
       <div style={{ marginBottom: '20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
