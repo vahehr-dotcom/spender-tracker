@@ -520,21 +520,21 @@ Rules:
     if (allData) {
       setAllExpenses(allData)
       buildMerchantMemory(allData)
-      calculateAIInsights(allData, categories)
+      // Don't calculate insights here - will be done in separate useEffect
     }
 
     const withReceipts = data.filter(x => x.receipt_image_url)
     for (const e of withReceipts) {
       await ensureReceiptThumb(e)
     }
-  }, [session, showArchived, search, buildMerchantMemory, calculateAIInsights, categories])
+  }, [session, showArchived, search, buildMerchantMemory])
 
   useEffect(() => {
     if (!session) return
     loadExpenses()
   }, [session, showArchived, loadExpenses])
 
-  // Recalculate insights when expenses or categories change
+  // Recalculate insights when BOTH expenses AND categories are ready
   useEffect(() => {
     if (allExpenses.length && categories.length) {
       calculateAIInsights(allExpenses, categories)
