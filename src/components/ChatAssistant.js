@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { supabase } from '../supabaseClient';
 
 export default function ChatAssistant({
   expenses,
   categories,
   isProMode,
   onUpgradeToPro,
-  onAICommand
+  onAICommand,
+  userId
 }) {
   const [aiInput, setAiInput] = useState('');
   const [isThinking, setIsThinking] = useState(false);
@@ -13,11 +15,13 @@ export default function ChatAssistant({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [lastResponse, setLastResponse] = useState('');
   const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [conversationHistory, setConversationHistory] = useState([]);
+  const [userInsights, setUserInsights] = useState([]);
+  const [userPreferences, setUserPreferences] = useState({});
 
   const recognitionRef = useRef(null);
   const audioRef = useRef(null);
   
-  // Store latest expenses/categories in refs so handleAISubmit always has current data
   const expensesRef = useRef(expenses);
   const categoriesRef = useRef(categories);
 
@@ -25,6 +29,107 @@ export default function ChatAssistant({
     expensesRef.current = expenses;
     categoriesRef.current = categories;
   }, [expenses, categories]);
+
+  // Load conversation history, insights, and preferences (Pro only)
+  useEffect(() => {
+    if (!userId || !isProMode) return;
+
+    const loadUserProfile = async () => {
+      // Load last 50 conversations
+      const { data: convos } = await supabase
+        .from('conversations')
+        .select('message, role, created_at')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (convos) {
+        const history = convos.reverse().map(c => ({
+          role: c.role,
+          content: c.message
+        }));
+        setConversationHistory(history);
+      }
+
+      // Load insights
+      const { data: insights } = await supabase
+        .from('user_insights')
+        .select('insight_type, insight_data, learned_at')
+        .eq('user_id', userId)
+        .eq('is_active', true)
+        .order('learned_at', { ascending: false });
+
+      if (insights) {
+        setUserInsights(insights);
+      }
+
+      // Load preferences
+      const { data: prefs } = await supabase
+        .from('user_preferences')
+        .select('preference_type, preference_value')
+        .eq('user_id', userId);
+
+      if (prefs) {
+        const prefsMap = {};
+        prefs.forEach(p => {
+          prefsMap[p.preference_type] = p.preference_value;
+        });
+        setUserPreferences(prefsMap);
+      }
+    };
+
+    loadUserProfile();
+  }, [userId, isProMode]);
+
+  // Save conversation to database (Pro only)
+  const saveConversation = async (role, message) => {
+    if (!userId || !isProMode) return;
+
+    await supabase.from('conversations').insert({
+      user_id: userId,
+      role,
+      message
+    });
+  };
+
+  // Extract and save insights from conversation (Pro only)
+  const extractInsights = async (userMessage, aiResponse) => {
+    if (!userId || !isProMode) return;
+
+    // Simple pattern detection (can be enhanced with AI later)
+    const lower = userMessage.toLowerCase();
+
+    // Detect preference changes
+    if (lower.includes('be more concise') || lower.includes('keep it short')) {
+      await supabase.from('user_preferences').upsert({
+        user_id: userId,
+        preference_type: 'response_style',
+        preference_value: 'concise'
+      }, { onConflict: 'user_id,preference_type' });
+      setUserPreferences(prev => ({ ...prev, response_style: 'concise' }));
+    }
+
+    if (lower.includes('give me more details') || lower.includes('be more detailed')) {
+      await supabase.from('user_preferences').upsert({
+        user_id: userId,
+        preference_type: 'response_style',
+        preference_value: 'detailed'
+      }, { onConflict: 'user_id,preference_type' });
+      setUserPreferences(prev => ({ ...prev, response_style: 'detailed' }));
+    }
+
+    // Detect nickname
+    const nicknameMatch = lower.match(/call me (\w+)/);
+    if (nicknameMatch) {
+      const nickname = nicknameMatch[1];
+      await supabase.from('user_preferences').upsert({
+        user_id: userId,
+        preference_type: 'nickname',
+        preference_value: nickname
+      }, { onConflict: 'user_id,preference_type' });
+      setUserPreferences(prev => ({ ...prev, nickname }));
+    }
+  };
 
   // Initialize speech recognition
   useEffect(() => {
@@ -64,7 +169,6 @@ export default function ChatAssistant({
     }
   };
 
-  // OpenAI TTS (nova voice)
   const speak = async (text) => {
     try {
       setIsSpeaking(true);
@@ -119,17 +223,31 @@ export default function ChatAssistant({
     }
   };
 
+  const clearConversation = async () => {
+    if (!userId || !isProMode) return;
+    
+    const confirmed = window.confirm('Clear conversation history? Nova will forget this conversation but will remember learned insights.');
+    if (!confirmed) return;
+
+    await supabase
+      .from('conversations')
+      .delete()
+      .eq('user_id', userId);
+
+    setConversationHistory([]);
+    setLastResponse('');
+  };
+
   const handleAISubmit = async (voiceInput = null) => {
     const userMessage = voiceInput || aiInput.trim();
     if (!userMessage) return;
 
     setIsThinking(true);
 
-    // Use refs to get CURRENT data, not stale closure
     const currentExpenses = expensesRef.current || [];
     const currentCategories = categoriesRef.current || [];
 
-    // Smarter command detection
+    // Check for commands first
     if (onAICommand) {
       const commandExecuted = parseAndExecuteCommand(userMessage);
       if (commandExecuted) {
@@ -141,7 +259,7 @@ export default function ChatAssistant({
       }
     }
 
-    // Build expense data from CURRENT refs
+    // Build expense data
     const expenseData = currentExpenses.map(e => {
       const cat = currentCategories.find(c => c.id === e.category_id);
       const spentDate = new Date(e.spent_at);
@@ -164,7 +282,6 @@ export default function ChatAssistant({
       };
     });
 
-    // Get current date/time
     const now = new Date();
     const currentDate = now.toLocaleDateString('en-US', { 
       weekday: 'long', 
@@ -177,18 +294,35 @@ export default function ChatAssistant({
       minute: '2-digit' 
     });
 
-    // System prompt with warm personality
-    const systemPrompt = isProMode
-      ? `You are Nova, a warm and professional financial advisor. When users greet you (e.g., "How are you?"), respond naturally and warmly (e.g., "I'm doing well! How can I help you today?"). Never say "I'm just a program" or "I don't have feelings"—be conversational and friendly.
+    // Build enhanced system prompt with memory (Pro only)
+    let memoryContext = '';
+    if (isProMode) {
+      // Add learned insights
+      if (userInsights.length > 0) {
+        memoryContext += '\n\nWhat you know about this user:\n';
+        userInsights.forEach(insight => {
+          memoryContext += `- ${insight.insight_data.description || JSON.stringify(insight.insight_data)}\n`;
+        });
+      }
 
-You have access to the user's complete expense history and provide elite-level financial insights. You can:
-- Analyze spending patterns and trends
-- Identify opportunities for savings
-- Suggest budget optimizations
-- Predict future expenses
-- Detect recurring charges
-- Provide tax and reimbursement guidance
-- Offer personalized financial advice
+      // Add preferences
+      if (Object.keys(userPreferences).length > 0) {
+        memoryContext += '\n\nUser preferences:\n';
+        if (userPreferences.nickname) {
+          memoryContext += `- Call them: ${userPreferences.nickname}\n`;
+        }
+        if (userPreferences.response_style) {
+          memoryContext += `- Response style: ${userPreferences.response_style}\n`;
+        }
+      }
+    }
+
+    const systemPrompt = isProMode
+      ? `You are Nova, a warm and professional financial advisor. When users greet you, respond naturally and warmly. Never say "I'm just a program"—be conversational and friendly.
+
+You have access to the user's complete expense history and provide elite-level financial insights. You remember past conversations and learn from every interaction.
+
+${memoryContext}
 
 Current date: ${currentDate}
 Current time: ${currentTime}
@@ -197,12 +331,7 @@ User's expenses:
 ${JSON.stringify(expenseData, null, 2)}
 
 Be concise, insightful, and actionable. Use your full analytical capabilities.`
-      : `You are Nova, a warm and friendly expense assistant. When users greet you (e.g., "How are you?"), respond naturally and warmly (e.g., "I'm doing well! How can I help you today?"). Never say "I'm just a program" or "I don't have feelings"—be conversational and approachable.
-
-You help users track expenses and answer basic questions. You can:
-- Show expenses by date, merchant, or category
-- Calculate totals and averages
-- Answer simple spending questions
+      : `You are Nova, a warm and friendly expense assistant. Respond naturally and warmly. You help track expenses and answer basic questions.
 
 Current date: ${currentDate}
 Current time: ${currentTime}
@@ -211,6 +340,17 @@ User's expenses:
 ${JSON.stringify(expenseData, null, 2)}
 
 Keep responses short and helpful. For deeper insights, gently mention Pro features.`;
+
+    // Build messages array with conversation history (Pro only)
+    const messages = [{ role: 'system', content: systemPrompt }];
+    
+    if (isProMode && conversationHistory.length > 0) {
+      // Include last 10 messages for context
+      const recentHistory = conversationHistory.slice(-10);
+      messages.push(...recentHistory);
+    }
+    
+    messages.push({ role: 'user', content: userMessage });
 
     try {
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -221,10 +361,7 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
         },
         body: JSON.stringify({
           model: 'gpt-4o',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userMessage }
-          ],
+          messages,
           max_tokens: isProMode ? 400 : 200,
           temperature: 0.7
         })
@@ -237,6 +374,20 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
 
       setLastResponse(aiMessage);
       speak(aiMessage);
+
+      // Save conversation and extract insights (Pro only)
+      if (isProMode) {
+        await saveConversation('user', userMessage);
+        await saveConversation('assistant', aiMessage);
+        await extractInsights(userMessage, aiMessage);
+
+        // Update local conversation history
+        setConversationHistory(prev => [
+          ...prev,
+          { role: 'user', content: userMessage },
+          { role: 'assistant', content: aiMessage }
+        ]);
+      }
     } catch (error) {
       console.error('AI error:', error);
       const errorMsg = 'Sorry, I encountered an error. Please try again.';
@@ -251,21 +402,18 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
   const parseAndExecuteCommand = (text) => {
     const lower = text.toLowerCase();
 
-    // Detect question words - if present, let AI answer conversationally
     const questionWords = ['when', 'what', 'where', 'how much', 'how many', 'which', 'why', 'who', 'did i'];
     const isQuestion = questionWords.some(word => lower.includes(word));
     
     if (isQuestion) {
-      return false; // Let AI answer the question
+      return false;
     }
 
-    // Detect add/create expense (only if explicit action words)
     if ((lower.includes('add') || lower.includes('spent') || lower.includes('bought') || lower.includes('create')) 
         && (lower.includes('at') || lower.includes('on') || lower.includes('for'))) {
       const amountMatch = text.match(/\$?(\d+(?:\.\d{2})?)/);
       const amount = amountMatch ? parseFloat(amountMatch[1]) : null;
 
-      // Extract merchant (stop at date keywords)
       const dateKeywords = ['yesterday', 'today', 'ago', 'last', 'week', 'month', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
       let merchant = null;
       const atMatch = text.match(/at\s+([a-zA-Z0-9\s]+)/i);
@@ -279,7 +427,6 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
         merchant = filtered.join(' ').trim();
       }
 
-      // Extract date hint
       let dateHint = 'today';
       if (lower.includes('yesterday')) dateHint = 'yesterday';
       else if (lower.includes('today')) dateHint = 'today';
@@ -303,7 +450,6 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
       }
     }
 
-    // Detect explicit show/filter commands (must have "show me" or "filter")
     if ((lower.includes('show me') || lower.includes('filter') || lower.includes('list')) 
         && !lower.includes('when') && !lower.includes('what')) {
       const query = text.replace(/show\s+me|filter|list|my|all|the/gi, '').trim();
@@ -313,13 +459,12 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
       }
     }
 
-    // Detect export (explicit)
     if (lower.includes('export') || lower.includes('download csv')) {
       onAICommand({ action: 'export' });
       return true;
     }
 
-    return false; // No command detected, let AI answer
+    return false;
   };
 
   return (
@@ -333,14 +478,40 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
     }}>
       {/* Header */}
       <div style={{ marginBottom: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-          <span style={{ fontSize: '32px' }}>🤖</span>
-          <div>
-            <h2 style={{ margin: 0, fontSize: '24px', fontWeight: '600' }}>Nova AI Assistant</h2>
-            <p style={{ margin: 0, fontSize: '14px', opacity: 0.9 }}>
-              {isProMode ? 'Elite Financial Advisor Mode' : 'Basic Expense Assistant'}
-            </p>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '32px' }}>🤖</span>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '24px', fontWeight: '600' }}>
+                Nova AI Assistant
+                {isProMode && userPreferences.nickname && (
+                  <span style={{ fontSize: '16px', opacity: 0.8, marginLeft: '8px' }}>
+                    • {userPreferences.nickname}
+                  </span>
+                )}
+              </h2>
+              <p style={{ margin: 0, fontSize: '14px', opacity: 0.9 }}>
+                {isProMode ? '🧠 Elite Financial Advisor Mode (Memory Active)' : 'Basic Expense Assistant'}
+              </p>
+            </div>
           </div>
+          {isProMode && conversationHistory.length > 0 && (
+            <button
+              onClick={clearConversation}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'rgba(255,255,255,0.2)',
+                color: 'white',
+                fontSize: '12px',
+                cursor: 'pointer',
+                fontWeight: '600'
+              }}
+            >
+              Clear Chat
+            </button>
+          )}
         </div>
       </div>
 
@@ -351,7 +522,7 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
           value={aiInput}
           onChange={(e) => setAiInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleAISubmit()}
-          placeholder="How can I help you today?"
+          placeholder={userPreferences.nickname ? `How can I help you, ${userPreferences.nickname}?` : "How can I help you today?"}
           style={{
             flex: 1,
             padding: '14px 18px',
@@ -466,8 +637,8 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
         </div>
       )}
 
-      {/* Pro Teaser (Free users only) */}
-      {!isProMode && (
+      {/* Pro Teaser or Memory Indicator */}
+      {!isProMode ? (
         <div style={{
           marginTop: '16px',
           padding: '12px',
@@ -476,7 +647,7 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
           fontSize: '13px',
           textAlign: 'center'
         }}>
-          💎 Upgrade to Pro for deeper insights, spending predictions, and elite financial advice
+          💎 Upgrade to Pro for Nova to remember you, learn your habits, and get smarter every day
           <button
             onClick={onUpgradeToPro}
             style={{
@@ -493,6 +664,18 @@ Keep responses short and helpful. For deeper insights, gently mention Pro featur
           >
             Upgrade
           </button>
+        </div>
+      ) : (
+        <div style={{
+          marginTop: '16px',
+          padding: '8px 12px',
+          background: 'rgba(255,255,255,0.1)',
+          borderRadius: '8px',
+          fontSize: '12px',
+          textAlign: 'center',
+          opacity: 0.8
+        }}>
+          🧠 Nova remembers {conversationHistory.length} messages • {userInsights.length} insights learned
         </div>
       )}
     </div>

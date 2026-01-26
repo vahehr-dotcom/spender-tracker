@@ -14,7 +14,7 @@ function App() {
 
   const [categories, setCategories] = useState([])
   const [expenses, setExpenses] = useState([])
-  const [allExpenses, setAllExpenses] = useState([]) // For AI assistant (unfiltered)
+  const [allExpenses, setAllExpenses] = useState([]) // For AI assistant
 
   const [amount, setAmount] = useState('')
   const [merchant, setMerchant] = useState('')
@@ -25,213 +25,113 @@ function App() {
   const [isSaving, setIsSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
 
-  // BASIC
   const [showMoreOptions, setShowMoreOptions] = useState(true)
   const [isTaxDeductible, setIsTaxDeductible] = useState(false)
   const [notes, setNotes] = useState('')
 
-  // PRO
   const isProMode = subscriptionStatus === 'pro'
   const [isReimbursable, setIsReimbursable] = useState(false)
   const [employerOrClient, setEmployerOrClient] = useState('')
   const [tagsText, setTagsText] = useState('')
 
-  // NEW: Budget tracking state
-  const [budgets, setBudgets] = useState({}) // { categoryId: { limit: number, spent: number } }
+  const [budgets, setBudgets] = useState({})
   const [showBudgetPanel, setShowBudgetPanel] = useState(false)
+  const [aiInsights, setAiInsights] = useState(null)
 
-  // NEW: AI Insights state
-  const [aiInsights, setAiInsights] = useState(null) // { prediction, recurring, alerts }
-
-  // Custom categories
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState('')
 
-  // Receipt
   const [receiptFile, setReceiptFile] = useState(null)
-  const [receiptUrls, setReceiptUrls] = useState({})
+  const [receiptUrls, setReceiptUrls] = useState([])
   const [isProcessingReceipt, setIsProcessingReceipt] = useState(false)
 
-  // Archive
   const [showArchived, setShowArchived] = useState(false)
-
-  // Search
   const [search, setSearch] = useState('')
-
-  // Undo banner
   const [undoBanner, setUndoBanner] = useState(null)
   const undoTimerRef = useRef(null)
 
-  // Merchant-memory map
-  const merchantMemoryRef = useRef(new Map())
-
-  // Learned indicator state
+  const merchantMemoryRef = useRef({})
   const [categoryLearnedSource, setCategoryLearnedSource] = useState(null)
 
-  const showUndoBanner = useCallback((banner, ms = 12000) => {
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current)
-    setUndoBanner(banner)
-    undoTimerRef.current = setTimeout(() => {
-      setUndoBanner(null)
-      undoTimerRef.current = null
-    }, ms)
-  }, [])
-
-  const clearUndoBanner = useCallback(() => {
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current)
-    undoTimerRef.current = null
-    setUndoBanner(null)
-  }, [])
-
-  const CATEGORY_RULES = useMemo(() => {
-    return {
-      Gas: ['chevron', 'shell', '76', 'mobile', 'exxon', 'bp', 'arco', 'valero', 'costco gas'],
-      Food: ['starbucks', 'mcdonald', 'chipotle', 'taco', 'pizza', 'restaurant', 'cafe', 'coffee', 'netflix', 'spotify'],
-      Home: ['home depot', 'lowes', "lowe's", 'ikea', 'target', 'walmart', 'amazon'],
-      Personal: ['cvs', 'walgreens', 'ulta', 'sephora', 'barber', 'salon', 'gym'],
-      Transportation: ['uber', 'lyft', 'taxi', 'bus', 'train', 'parking'],
-      Other: []
-    }
-  }, [])
-
-  // session
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
     })
-    return () => sub.subscription.unsubscribe()
+    const {
+      data: { subscription }
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+    })
+    return () => subscription.unsubscribe()
   }, [])
 
-  // Load subscription status
   useEffect(() => {
-    if (!session?.user?.id) return
-
-    const loadSubscription = async () => {
-      const { data, error } = await supabase
-        .from('user_subscriptions')
-        .select('subscription_status')
-        .eq('user_id', session.user.id)
-        .single()
-
-      if (!error && data) {
-        setSubscriptionStatus(data.subscription_status === 'pro' ? 'pro' : 'free')
-      } else {
-        await supabase.from('user_subscriptions').insert({
-          user_id: session.user.id,
-          subscription_status: 'free'
-        })
-        setSubscriptionStatus('free')
-      }
+    if (session) {
+      loadSubscription()
+      loadCategories()
+      loadExpenses()
     }
-
-    loadSubscription()
   }, [session])
 
-  // Reset pro features when not pro
-  useEffect(() => {
-    if (!isProMode) {
-      setIsReimbursable(false)
-      setEmployerOrClient('')
-      setTagsText('')
-    }
-  }, [isProMode])
+  const loadSubscription = async () => {
+    if (!session) return
+    const { data } = await supabase
+      .from('subscriptions')
+      .select('status')
+      .eq('user_id', session.user.id)
+      .single()
+    if (data) setSubscriptionStatus(data.status)
+  }
 
-  // Merchant key normalization
-  const normalizeMerchantKey = useCallback((s) => {
-    let t = String(s || '').toLowerCase().trim()
-    t = t.replace(/[\s\-_]+/g, ' ')
-    t = t.replace(/\s*#\s*\d+\s*$/g, '')
-    t = t.replace(/\s*(store|unit|location)\s*\d+\s*$/g, '')
-    t = t.replace(/[^a-z0-9 &]/g, '')
-    t = t.replace(/\s+/g, ' ').trim()
-    return t
+  function normalizeMerchantKey(m) {
+    return m.toLowerCase().replace(/[^a-z0-9]/g, '')
+  }
+
+  const buildMerchantMemory = useCallback((expensesData) => {
+    const mem = {}
+    for (const exp of expensesData) {
+      if (!exp.merchant || !exp.category_id) continue
+      const key = normalizeMerchantKey(exp.merchant)
+      if (!mem[key]) {
+        mem[key] = { categoryId: exp.category_id, count: 0 }
+      }
+      mem[key].count++
+    }
+    merchantMemoryRef.current = mem
   }, [])
 
-  const buildMerchantMemory = useCallback((list) => {
-    const m = new Map()
-    for (const e of list || []) {
-      if (!e?.merchant || !e?.category_id) continue
-      const key = normalizeMerchantKey(e.merchant)
-      if (!key) continue
-
-      if (!m.has(key)) m.set(key, new Map())
-      const inner = m.get(key)
-      inner.set(e.category_id, (inner.get(e.category_id) || 0) + 1)
-    }
-
-    const best = new Map()
-    for (const [merchantKey, countsByCategory] of m.entries()) {
-      let topCategoryId = null
-      let topCount = 0
-      for (const [cid, cnt] of countsByCategory.entries()) {
-        if (cnt > topCount) {
-          topCount = cnt
-          topCategoryId = cid
-        }
+  const suggestCategoryForMerchant = useCallback(
+    (merchantName) => {
+      if (!merchantName) return null
+      const key = normalizeMerchantKey(merchantName)
+      const entry = merchantMemoryRef.current[key]
+      if (entry && entry.count >= 2) {
+        return entry.categoryId
       }
-      if (topCategoryId) best.set(merchantKey, { categoryId: topCategoryId, count: topCount })
-    }
-
-    merchantMemoryRef.current = best
-  }, [normalizeMerchantKey])
-
-  const suggestCategoryForMerchant = useCallback((merchantText) => {
-    const key = normalizeMerchantKey(merchantText)
-    if (!key) {
-      setCategoryLearnedSource(null)
       return null
-    }
+    },
+    []
+  )
 
-    const learned = merchantMemoryRef.current.get(key)
-    if (learned?.categoryId) {
-      const exists = categories.some(c => c.id === learned.categoryId)
-      if (exists) {
-        setCategoryLearnedSource('learned')
-        return learned.categoryId
-      }
-    }
-
-    const ruleResult = pickCategoryIdFromMerchant(merchantText, categories, CATEGORY_RULES)
-    if (ruleResult) {
-      setCategoryLearnedSource('rule')
-    } else {
-      setCategoryLearnedSource(null)
-    }
-    return ruleResult
-  }, [normalizeMerchantKey, categories, CATEGORY_RULES])
-
-  // Auto-select category when merchant changes
   useEffect(() => {
-    if (!session?.user?.id) return
-    if (!merchant || !categories.length) {
+    if (!merchant) {
       setCategoryLearnedSource(null)
       return
     }
-
-    const suggestion = suggestCategoryForMerchant(merchant)
-    if (suggestion && suggestion !== categoryId) {
-      setCategoryId(suggestion)
+    const suggested = suggestCategoryForMerchant(merchant)
+    if (suggested) {
+      setCategoryId(suggested)
+      setCategoryLearnedSource(merchant)
     }
-  }, [merchant, categories, session, suggestCategoryForMerchant, categoryId])
+  }, [merchant, suggestCategoryForMerchant])
 
-  // NEW FEATURE 5: Enhanced Receipt OCR with tip/tax breakdown
-  const processReceiptWithOCR = useCallback(async (file) => {
-    if (!file) return
-
-    setIsProcessingReceipt(true)
-    setStatus('🤖 Reading receipt with AI...')
-
-    try {
-      const base64 = await fileToBase64(file)
-
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
+  const processReceiptWithOCR = useCallback(
+    async (file) => {
+      if (!file) return
+      setIsProcessingReceipt(true)
+      try {
+        const base64 = await fileToBase64(file)
+        const payload = {
           model: 'gpt-4o',
           messages: [
             {
@@ -239,25 +139,7 @@ function App() {
               content: [
                 {
                   type: 'text',
-                  text: `Extract DETAILED expense data from this receipt. Return ONLY valid JSON (no markdown):
-{
-  "amount": <total after tax/tip as number>,
-  "merchant": <store name string>,
-  "date": <YYYY-MM-DD or null>,
-  "category_hint": <"Gas"|"Food"|"Home"|"Personal"|"Transportation"|"Other"|null>,
-  "subtotal": <amount before tax as number or null>,
-  "tax": <tax amount as number or null>,
-  "tip": <tip amount as number or null>,
-  "tip_percent": <tip percentage as number or null>
-}
-
-Rules:
-- amount: TOTAL paid (subtotal + tax + tip)
-- Extract subtotal, tax, tip separately if visible
-- Calculate tip_percent if tip and subtotal available
-- merchant: clean name (e.g. "Starbucks")
-- date: YYYY-MM-DD format
-- Return ONLY JSON, no explanations`
+                  text: 'Extract: merchant name, total amount, date (YYYY-MM-DD), items. Return JSON: {merchant, amount, date, items:[{name, price}]}'
                 },
                 {
                   type: 'image_url',
@@ -266,580 +148,346 @@ Rules:
               ]
             }
           ],
-          max_tokens: 400,
-          temperature: 0
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error(`OpenAI API error: ${response.status}`)
-      }
-
-      const data = await response.json()
-      const content = data?.choices?.[0]?.message?.content?.trim()
-
-      if (!content) {
-        throw new Error('No response from AI')
-      }
-
-      let jsonText = content
-      if (jsonText.startsWith('```')) {
-        jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-      }
-
-      const parsed = JSON.parse(jsonText)
-
-      if (parsed.amount) {
-        setAmount(String(parsed.amount))
-      }
-
-      if (parsed.merchant) {
-        setMerchant(parsed.merchant)
-        const auto = suggestCategoryForMerchant(parsed.merchant)
-        if (auto) {
-          setCategoryId(auto)
-        } else if (parsed.category_hint) {
-          const hintCat = categories.find(c => 
-            c.name.toLowerCase() === parsed.category_hint.toLowerCase()
-          )
-          if (hintCat) setCategoryId(hintCat.id)
+          max_tokens: 500
         }
-      }
-
-      if (parsed.date) {
-        try {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
+          },
+          body: JSON.stringify(payload)
+        })
+        if (!res.ok) throw new Error('OCR failed')
+        const json = await res.json()
+        const text = json.choices?.[0]?.message?.content || ''
+        const parsed = JSON.parse(text.replace(/```json\n?|\n?```/g, ''))
+        if (parsed.merchant) setMerchant(parsed.merchant)
+        if (parsed.amount) setAmount(String(parsed.amount))
+        if (parsed.date) {
           const d = new Date(parsed.date)
-          if (!isNaN(d.getTime())) {
-            const pad = (n) => String(n).padStart(2, '0')
-            const yyyy = d.getFullYear()
-            const mm = pad(d.getMonth() + 1)
-            const dd = pad(d.getDate())
-            const hh = pad(d.getHours())
-            const min = pad(d.getMinutes())
-            setSpentAtLocal(`${yyyy}-${mm}-${dd}T${hh}:${min}`)
+          if (!isNaN(d)) {
+            const local = d.toISOString().slice(0, 16)
+            setSpentAtLocal(local)
           }
-        } catch {}
+        }
+        if (parsed.items && parsed.items.length > 0) {
+          setNotes(parsed.items.map((it) => `${it.name}: $${it.price}`).join('; '))
+        }
+      } catch (err) {
+        console.error('OCR error:', err)
+      } finally {
+        setIsProcessingReceipt(false)
       }
-
-      // Build enhanced notes with breakdown
-      let enhancedNotes = ''
-      if (parsed.subtotal) enhancedNotes += `Subtotal: $${parsed.subtotal.toFixed(2)}\n`
-      if (parsed.tax) enhancedNotes += `Tax: $${parsed.tax.toFixed(2)}\n`
-      if (parsed.tip) {
-        enhancedNotes += `Tip: $${parsed.tip.toFixed(2)}`
-        if (parsed.tip_percent) enhancedNotes += ` (${parsed.tip_percent.toFixed(1)}%)`
-      }
-      if (enhancedNotes) setNotes(enhancedNotes.trim())
-
-      setStatus('✅ Receipt analyzed! (Subtotal, tax, tip extracted)')
-      setCategoryLearnedSource('ai')
-
-      setTimeout(() => {
-        if (status.includes('Receipt analyzed')) setStatus('')
-      }, 4000)
-
-    } catch (err) {
-      console.error('OCR error:', err)
-      setStatus(`⚠️ OCR failed: ${err.message}`)
-    } finally {
-      setIsProcessingReceipt(false)
-    }
-  }, [suggestCategoryForMerchant, categories, status])
-
-  // Trigger OCR when receipt file changes
-  useEffect(() => {
-    if (receiptFile && !isProcessingReceipt) {
-      processReceiptWithOCR(receiptFile)
-    }
-  }, [receiptFile, isProcessingReceipt, processReceiptWithOCR])
+    },
+    []
+  )
 
   const loadCategories = useCallback(async () => {
     if (!session) return
-    
     const { data, error } = await supabase
       .from('categories')
-      .select('id,name,is_custom,user_id')
+      .select('id, name, icon, color')
+      .eq('user_id', session.user.id)
       .order('name')
-
-    if (!error && data) {
-      const filtered = data.filter(c => c.user_id === null || c.user_id === session.user.id)
-      setCategories(filtered)
-      if (!categoryId && filtered[0]) setCategoryId(filtered[0].id)
-    }
-  }, [session, categoryId])
-
-  useEffect(() => {
-    if (!session) return
-    loadCategories()
-  }, [session, loadCategories])
-
-  const ensureReceiptThumb = async (expense) => {
-    if (!expense?.id || !expense?.receipt_image_url) return
-    if (receiptUrls[expense.id]) return
-
-    const { data, error } = await supabase.storage
-      .from('receipts')
-      .createSignedUrl(expense.receipt_image_url, 60 * 10)
-
-    if (!error && data?.signedUrl) {
-      setReceiptUrls(prev => ({ ...prev, [expense.id]: data.signedUrl }))
-    }
-  }
-
-  // NEW FEATURE 2 & 3 & 4: Calculate budgets, predictions, recurring expenses
-  const calculateAIInsights = useCallback((expensesList, categoriesList) => {
-    if (!isProMode || !expensesList.length) {
-      setAiInsights(null)
+    if (error) {
+      console.error('Load categories error:', error)
       return
     }
+    setCategories(data || [])
+  }, [session])
 
-    const now = new Date()
-    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-    
-    // Current month expenses
-    const thisMonth = expensesList.filter(e => {
-      const d = new Date(e.spent_at)
-      const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      return m === currentMonth && !e.archived
-    })
+  const ensureReceiptThumb = useCallback(async (expenseId, imgUrl) => {
+    if (!imgUrl) return imgUrl
+    const { data } = await supabase.storage.from('receipts').createSignedUrl(imgUrl, 60 * 10)
+    return data?.signedUrl || imgUrl
+  }, [])
 
-    // Last month expenses
-    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-    const lastMonth = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`
-    const lastMonthExpenses = expensesList.filter(e => {
-      const d = new Date(e.spent_at)
-      const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      return m === lastMonth && !e.archived
-    })
+  const calculateAIInsights = useCallback(
+    async (expensesData, categoriesData) => {
+      if (!isProMode || expensesData.length === 0) return
+      const now = new Date()
+      const currentMonth = now.getMonth()
+      const currentYear = now.getFullYear()
+      const thisMonth = expensesData.filter((e) => {
+        const d = new Date(e.spent_at)
+        return d.getMonth() === currentMonth && d.getFullYear() === currentYear
+      })
+      const totalThisMonth = thisMonth.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0)
+      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate()
+      const dayOfMonth = now.getDate()
+      const avgPerDay = totalThisMonth / dayOfMonth
+      const remainingDays = daysInMonth - dayOfMonth
+      const forecastTotal = totalThisMonth + avgPerDay * remainingDays
 
-    // FEATURE 3: Spending prediction
-    const thisMonthTotal = thisMonth.reduce((sum, e) => sum + Number(e.amount), 0)
-    const lastMonthTotal = lastMonthExpenses.reduce((sum, e) => sum + Number(e.amount), 0)
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
-    const daysPassed = now.getDate()
-    const daysRemaining = daysInMonth - daysPassed
-    const dailyAvg = daysPassed > 0 ? thisMonthTotal / daysPassed : 0
-    const predictedTotal = thisMonthTotal + (dailyAvg * daysRemaining)
-
-    // FEATURE 4: Recurring expense detection
-    const merchantFrequency = {}
-    expensesList.slice(0, 90).forEach(e => { // Last 90 expenses
-      const key = normalizeMerchantKey(e.merchant)
-      if (!key) return
-      if (!merchantFrequency[key]) {
-        merchantFrequency[key] = { merchant: e.merchant, amounts: [], dates: [] }
+      const merchantCounts = {}
+      for (const exp of expensesData) {
+        const m = exp.merchant || 'Unknown'
+        merchantCounts[m] = (merchantCounts[m] || 0) + 1
       }
-      merchantFrequency[key].amounts.push(Number(e.amount))
-      merchantFrequency[key].dates.push(new Date(e.spent_at))
-    })
+      const recurring = Object.entries(merchantCounts)
+        .filter(([, count]) => count >= 3)
+        .map(([merchant, count]) => ({ merchant, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5)
 
-    const recurring = []
-    Object.entries(merchantFrequency).forEach(([key, data]) => {
-      if (data.amounts.length >= 2) {
-        const avgAmount = data.amounts.reduce((a, b) => a + b, 0) / data.amounts.length
-        const amountVariance = Math.max(...data.amounts) - Math.min(...data.amounts)
-        const isConsistentAmount = amountVariance < avgAmount * 0.1 // Less than 10% variance
-
-        if (isConsistentAmount && data.dates.length >= 2) {
-          // Check if dates are roughly monthly
-          const sortedDates = data.dates.sort((a, b) => b - a)
-          const daysBetween = []
-          for (let i = 0; i < sortedDates.length - 1; i++) {
-            const diff = (sortedDates[i] - sortedDates[i + 1]) / (1000 * 60 * 60 * 24)
-            daysBetween.push(diff)
-          }
-          const avgDaysBetween = daysBetween.reduce((a, b) => a + b, 0) / daysBetween.length
-
-          if (avgDaysBetween >= 25 && avgDaysBetween <= 35) { // Roughly monthly
-            recurring.push({
-              merchant: data.merchant,
-              amount: avgAmount,
-              frequency: 'monthly',
-              lastDate: sortedDates[0]
-            })
-          }
-        }
+      const catSpending = {}
+      for (const exp of thisMonth) {
+        const cid = exp.category_id || 'uncategorized'
+        catSpending[cid] = (catSpending[cid] || 0) + parseFloat(exp.amount || 0)
       }
-    })
+      const categorySpending = categoriesData
+        .map((cat) => ({
+          name: cat.name,
+          icon: cat.icon,
+          total: catSpending[cat.id] || 0
+        }))
+        .filter((c) => c.total > 0)
+        .sort((a, b) => b.total - a.total)
 
-    // FEATURE 2: Budget tracking - calculate spent per category
-    const categorySpending = {}
-    thisMonth.forEach(e => {
-      const catId = e.category_id
-      if (!categorySpending[catId]) categorySpending[catId] = 0
-      categorySpending[catId] += Number(e.amount)
-    })
-
-    setAiInsights({
-      prediction: {
-        currentTotal: thisMonthTotal,
-        predictedTotal,
-        lastMonthTotal,
-        daysRemaining,
-        dailyAvg
-      },
-      recurring,
-      categorySpending
-    })
-
-  }, [isProMode, normalizeMerchantKey])
+      setAiInsights({
+        forecastTotal: forecastTotal.toFixed(2),
+        recurringExpenses: recurring,
+        categorySpending
+      })
+    },
+    [isProMode]
+  )
 
   const loadExpenses = useCallback(async () => {
-    if (!session?.user?.id) return
-
-    setStatus('')
-
-    let q = supabase
+    if (!session) return
+    let query = supabase
       .from('expenses')
-      .select('id, amount, merchant, payment_method, spent_at, created_at, category_id, receipt_image_url, is_tax_deductible, is_reimbursable, employer_or_client, notes, archived, tags, location')
+      .select(
+        'id, amount, merchant, payment_method, spent_at, created_at, category_id, receipt_image_url, is_tax_deductible, is_reimbursable, employer_or_client, notes, archived, tags, location'
+      )
+      .eq('user_id', session.user.id)
       .order('spent_at', { ascending: false })
-      .order('created_at', { ascending: false })
-      .eq('archived', showArchived)
 
-    const s = search.trim()
-    if (s) {
-      q = q.or(`merchant.ilike.%${escapeIlike(s)}%,notes.ilike.%${escapeIlike(s)}%`)
+    if (!showArchived) {
+      query = query.eq('archived', false)
+    }
+    if (search) {
+      query = query.or(
+        `merchant.ilike.${escapeIlike(search)},notes.ilike.${escapeIlike(search)}`
+      )
     }
 
-    const { data, error } = await q
-
-    if (error || !data) {
-      setStatus(error?.message || 'Could not load expenses')
+    const { data, error } = await query
+    if (error) {
+      console.error('Load expenses error:', error)
       return
     }
+    setExpenses(data || [])
 
-    setExpenses(data)
-
-    // Load ALL expenses for AI (no filters)
-    const { data: allData } = await supabase
+    const { data: allData, error: allError } = await supabase
       .from('expenses')
-      .select('id, amount, merchant, payment_method, spent_at, created_at, category_id, receipt_image_url, is_tax_deductible, is_reimbursable, employer_or_client, notes, archived, tags, location')
+      .select(
+        'id, amount, merchant, payment_method, spent_at, created_at, category_id, receipt_image_url, is_tax_deductible, is_reimbursable, employer_or_client, notes, archived, tags, location'
+      )
+      .eq('user_id', session.user.id)
       .order('spent_at', { ascending: false })
-      .order('created_at', { ascending: false })
 
-    if (allData) {
+    if (!allError && allData) {
       setAllExpenses(allData)
       buildMerchantMemory(allData)
-      // Don't calculate insights here - will be done in separate useEffect
+      calculateAIInsights(allData, categories)
     }
-
-    const withReceipts = data.filter(x => x.receipt_image_url)
-    for (const e of withReceipts) {
-      await ensureReceiptThumb(e)
-    }
-  }, [session, showArchived, search, buildMerchantMemory])
+  }, [session, showArchived, search, buildMerchantMemory, calculateAIInsights, categories])
 
   useEffect(() => {
-    if (!session) return
-    loadExpenses()
-  }, [session, showArchived, loadExpenses])
-
-  // Recalculate insights when BOTH expenses AND categories are ready
-  useEffect(() => {
-    if (allExpenses.length && categories.length) {
+    if (allExpenses.length > 0 && categories.length > 0) {
       calculateAIInsights(allExpenses, categories)
     }
   }, [allExpenses, categories, calculateAIInsights])
 
   const login = async (email, password) => {
-    setStatus('')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) setStatus(error.message)
+    if (error) alert(error.message)
   }
 
   const logout = async () => {
     await supabase.auth.signOut()
-    setStatus('Logged out')
+    setSession(null)
   }
 
   const addCustomCategory = async () => {
-    setStatus('')
-    const name = newCategoryName.trim()
-    if (!name) {
-      setStatus('Category name required')
-      return
-    }
-
+    if (!newCategoryName.trim() || !session) return
     const { error } = await supabase.from('categories').insert({
       user_id: session.user.id,
-      name,
-      is_custom: true
+      name: newCategoryName.trim(),
+      icon: '📦',
+      color: '#888888'
     })
-
     if (error) {
-      setStatus(error.message)
+      alert('Error adding category: ' + error.message)
       return
     }
-
     setNewCategoryName('')
     setShowAddCategory(false)
-    setStatus('Category added')
     await loadCategories()
   }
 
-  const addExpense = async () => {
-    setStatus('')
+  const addExpense = async (e) => {
+    e.preventDefault()
+    if (!session) return
+    if (!amount || !merchant) {
+      setStatus('Please fill required fields.')
+      return
+    }
     setIsSaving(true)
+    setStatus('')
     setSaveSuccess(false)
 
-    const amt = parseFloat(amount)
-
-    if (!session?.user?.id) {
-      setStatus('Not logged in')
-      setIsSaving(false)
-      return
-    }
-
-    if (!amt || !merchant || !categoryId) {
-      setStatus('Missing fields')
-      setIsSaving(false)
-      return
-    }
-
-    const spentAtIso = new Date(spentAtLocal).toISOString()
-    const tags = isProMode ? parseTags(tagsText) : null
-    const location = await getLocationString()
-
-    const { data: inserted, error: insertError } = await supabase
-      .from('expenses')
-      .insert({
-        user_id: session.user.id,
-        amount: amt,
-        merchant,
-        category_id: categoryId,
-        payment_method: paymentMethod,
-        spent_at: spentAtIso,
-        raw_input: null,
-        is_tax_deductible: isTaxDeductible,
-        is_reimbursable: isProMode ? isReimbursable : false,
-        employer_or_client: isProMode && isReimbursable ? (employerOrClient || null) : null,
-        notes: notes?.trim() ? notes.trim() : null,
-        archived: false,
-        tags,
-        location
-      })
-      .select('id')
-      .single()
-
-    if (insertError) {
-      setStatus(insertError.message)
-      setIsSaving(false)
-      return
-    }
-
-    const expenseId = inserted?.id
-
-    if (receiptFile && expenseId) {
-      setStatus('Uploading receipt...')
-
-      const safeName = sanitizeFilename(receiptFile.name || 'receipt.jpg')
-      const path = `${session.user.id}/${expenseId}/${Date.now()}-${safeName}`
-
+    let receiptUrl = null
+    if (receiptFile) {
+      const ext = receiptFile.name.split('.').pop()
+      const filename = sanitizeFilename(`${Date.now()}_${merchant}.${ext}`)
+      const filePath = `${session.user.id}/${filename}`
       const { error: uploadError } = await supabase.storage
         .from('receipts')
-        .upload(path, receiptFile, { cacheControl: '3600', upsert: false })
-
+        .upload(filePath, receiptFile)
       if (uploadError) {
-        setStatus(`Receipt upload failed: ${uploadError.message}`)
+        setStatus('Receipt upload failed: ' + uploadError.message)
         setIsSaving(false)
-        await loadExpenses()
         return
       }
+      receiptUrl = filePath
+    }
 
-      const { error: updateError } = await supabase
-        .from('expenses')
-        .update({ receipt_image_url: path })
-        .eq('id', expenseId)
-
-      if (updateError) {
-        setStatus(`Receipt uploaded, but link failed: ${updateError.message}`)
-        setIsSaving(false)
-        await loadExpenses()
-        return
+    let location = null
+    if (navigator.geolocation) {
+      try {
+        const pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 })
+        })
+        location = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          label: await getLocationString(pos.coords.latitude, pos.coords.longitude)
+        }
+      } catch (err) {
+        console.warn('Geolocation failed:', err)
       }
     }
 
+    const tags = parseTags(tagsText)
+    const expenseData = {
+      user_id: session.user.id,
+      amount: parseFloat(amount),
+      merchant: merchant.trim(),
+      category_id: categoryId || null,
+      payment_method: paymentMethod,
+      spent_at: new Date(spentAtLocal).toISOString(),
+      is_tax_deductible: isTaxDeductible,
+      notes: notes.trim() || null,
+      receipt_image_url: receiptUrl,
+      is_reimbursable: isProMode ? isReimbursable : false,
+      employer_or_client: isProMode && isReimbursable ? employerOrClient.trim() || null : null,
+      tags: tags.length > 0 ? tags : null,
+      location: location ? JSON.stringify(location) : null
+    }
+
+    const { error } = await supabase.from('expenses').insert(expenseData)
+    setIsSaving(false)
+    if (error) {
+      setStatus('Error: ' + error.message)
+      return
+    }
+
+    setSaveSuccess(true)
+    setTimeout(() => setSaveSuccess(false), 2000)
     setAmount('')
     setMerchant('')
+    setCategoryId('')
+    setPaymentMethod('card')
     setSpentAtLocal(getNowLocalDateTime())
-    setReceiptFile(null)
     setIsTaxDeductible(false)
     setNotes('')
+    setReceiptFile(null)
+    setReceiptUrls([])
     setIsReimbursable(false)
     setEmployerOrClient('')
     setTagsText('')
     setCategoryLearnedSource(null)
 
-    setIsSaving(false)
-    setSaveSuccess(true)
-    setStatus('Saved')
-
-    setTimeout(() => setSaveSuccess(false), 2000)
-
     await loadExpenses()
   }
 
-  const updateExpense = async (updatedExpense) => {
-    setStatus('')
-    
-    const { error } = await supabase
-      .from('expenses')
-      .update({
-        amount: updatedExpense.amount,
-        merchant: updatedExpense.merchant,
-        category_id: updatedExpense.category_id,
-        payment_method: updatedExpense.payment_method,
-        spent_at: updatedExpense.spent_at,
-        is_tax_deductible: updatedExpense.is_tax_deductible,
-        is_reimbursable: updatedExpense.is_reimbursable,
-        employer_or_client: updatedExpense.employer_or_client,
-        notes: updatedExpense.notes,
-        tags: updatedExpense.tags
-      })
-      .eq('id', updatedExpense.id)
-
+  const updateExpense = async (id, updates) => {
+    const { error } = await supabase.from('expenses').update(updates).eq('id', id)
     if (error) {
-      setStatus(`Update failed: ${error.message}`)
+      alert('Update failed: ' + error.message)
       return
     }
-
-    setStatus('✓ Updated')
-    setTimeout(() => setStatus(''), 2000)
     await loadExpenses()
   }
 
-  const setArchivedForExpense = async (expenseId, archived) => {
-    setStatus('')
-    const { error } = await supabase
-      .from('expenses')
-      .update({ archived })
-      .eq('id', expenseId)
-
-    if (error) {
-      setStatus(error.message)
-      return false
-    }
-
-    await loadExpenses()
-    return true
+  const setArchivedForExpense = async (id, archived) => {
+    await updateExpense(id, { archived })
   }
 
-  const archiveWithUndo = async (expenseId) => {
-    clearUndoBanner()
-
-    const ok = await setArchivedForExpense(expenseId, true)
-    if (!ok) return
-
-    showUndoBanner({
-      message: 'Expense archived.',
-      actionLabel: 'Undo',
-      onAction: async () => {
-        clearUndoBanner()
-        await setArchivedForExpense(expenseId, false)
-        showUndoBanner({ message: 'Restored.' }, 2500)
-      }
-    })
+  const archiveWithUndo = (expense) => {
+    setArchivedForExpense(expense.id, true)
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current)
+    setUndoBanner(expense)
+    undoTimerRef.current = setTimeout(() => {
+      setUndoBanner(null)
+    }, 5000)
   }
 
-  const deleteExpense = async (expenseId) => {
-    setStatus('')
-    const ok = window.confirm('Delete this expense permanently?')
-    if (!ok) return
-
-    const { error } = await supabase.rpc('delete_expense', { p_id: expenseId })
+  const deleteExpense = async (id) => {
+    if (!window.confirm('Permanently delete this expense?')) return
+    const { error } = await supabase.from('expenses').delete().eq('id', id)
     if (error) {
-      setStatus(error.message)
+      alert('Delete failed: ' + error.message)
       return
     }
-
     await loadExpenses()
   }
 
-  const openReceipt = async (expense) => {
-    if (!expense?.receipt_image_url) return
-    setStatus('Opening receipt...')
-
-    const { data, error } = await supabase.storage
-      .from('receipts')
-      .createSignedUrl(expense.receipt_image_url, 60 * 10)
-
-    if (error || !data?.signedUrl) {
-      setStatus(error?.message || 'Could not open receipt')
-      return
+  const openReceipt = async (receiptPath) => {
+    if (!receiptPath) return
+    const { data } = await supabase.storage.from('receipts').createSignedUrl(receiptPath, 60 * 10)
+    if (data?.signedUrl) {
+      window.open(data.signedUrl, '_blank')
     }
-
-    setStatus('')
-    window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
   }
 
   const exportCsv = () => {
-    if (!expenses || expenses.length === 0) {
-      setStatus('No expenses to export')
-      return
-    }
-
-    const categoryName = (id) => {
-      const c = categories.find(x => x.id === id)
-      return c ? c.name : '—'
-    }
-
-    const header = [
-      'date_time',
-      'amount',
-      'paid_to',
-      'category',
-      'payment_method',
-      'tax_deductible',
-      'reimbursable',
-      'employer_or_client',
-      'notes',
-      'tags',
-      'location',
-      'receipt_attached',
-      'archived'
-    ]
-
-    const rows = expenses.map(e => {
-      const row = [
-        new Date(e.spent_at).toISOString(),
-        Number(e.amount).toFixed(2),
-        e.merchant || '',
-        categoryName(e.category_id),
-        e.payment_method || '',
-        e.is_tax_deductible ? 'yes' : 'no',
-        e.is_reimbursable ? 'yes' : 'no',
-        e.employer_or_client || '',
-        e.notes || '',
-        (e.tags || []).join('|'),
-        e.location || '',
-        e.receipt_image_url ? 'yes' : 'no',
-        e.archived ? 'yes' : 'no'
-      ]
-      return row.map(csvEscape).join(',')
+    const header =
+      'Date,Merchant,Amount,Category,Payment Method,Tax Deductible,Reimbursable,Employer/Client,Notes,Tags\n'
+    const rows = expenses.map((exp) => {
+      const cat = categories.find((c) => c.id === exp.category_id)
+      return [
+        exp.spent_at,
+        csvEscape(exp.merchant || ''),
+        exp.amount,
+        csvEscape(cat?.name || 'Uncategorized'),
+        exp.payment_method,
+        exp.is_tax_deductible ? 'Yes' : 'No',
+        exp.is_reimbursable ? 'Yes' : 'No',
+        csvEscape(exp.employer_or_client || ''),
+        csvEscape(exp.notes || ''),
+        csvEscape((exp.tags || []).join(', '))
+      ].join(',')
     })
-
-    const csv = [header.join(','), ...rows].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const csv = header + rows.join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
-
     const a = document.createElement('a')
     a.href = url
-    a.download = `spender-tracker-${showArchived ? 'archived' : 'active'}-${new Date().toISOString().slice(0, 10)}.csv`
-    document.body.appendChild(a)
+    a.download = `expenses_${new Date().toISOString().split('T')[0]}.csv`
     a.click()
-    document.body.removeChild(a)
-
-    URL.revokeObjectURL(url)
-    setStatus('CSV exported')
   }
 
-  const runSearch = async () => {
-    await loadExpenses()
+  const runSearch = () => {
+    loadExpenses()
   }
 
-  const clearSearch = async () => {
+  const clearSearch = () => {
     setSearch('')
-    setTimeout(() => loadExpenses(), 0)
+    setTimeout(() => loadExpenses(), 100)
   }
 
   const upgradeToPro = () => {
@@ -847,365 +495,321 @@ Rules:
   }
 
   const handleStripeCheckout = async () => {
-    setStatus('Stripe checkout not wired yet (no fake Pro upgrade).')
-    setShowPaywall(false)
-    setSubscriptionStatus('free')
+    alert('Stripe checkout not yet wired. Coming soon!')
   }
 
-  // NEW FEATURE 1: Handle AI commands with natural language date parsing
-  const handleAICommand = (command) => {
-    if (command.action === 'add_expense') {
-      if (command.data.amount) setAmount(String(command.data.amount))
-      if (command.data.merchant) setMerchant(command.data.merchant)
-      
-      // NEW: Natural language date parsing
-      if (command.data.dateHint) {
-        const parsedDate = parseNaturalDate(command.data.dateHint)
-        if (parsedDate) {
-          setSpentAtLocal(parsedDate)
-          setStatus(`✨ AI filled form with date: ${command.data.dateHint}`)
+  const handleAICommand = useCallback(
+    async (cmd) => {
+      if (cmd.action === 'add_expense') {
+        const { merchant: m, amount: a, dateHint } = cmd.data
+        if (m) setMerchant(m)
+        if (a) setAmount(String(a))
+        if (dateHint) {
+          const parsed = parseNaturalDate(dateHint)
+          if (parsed) {
+            setSpentAtLocal(parsed.toISOString().slice(0, 16))
+          }
         }
-      } else {
-        setStatus('✨ AI filled the form—review and save')
+      } else if (cmd.action === 'search') {
+        setSearch(cmd.data.query || '')
+        setTimeout(() => loadExpenses(), 100)
+      } else if (cmd.action === 'export') {
+        exportCsv()
       }
-    }
+    },
+    [loadExpenses]
+  )
 
-    if (command.action === 'search') {
-      setSearch(command.data.query)
-      setTimeout(() => loadExpenses(), 100)
-    }
-
-    if (command.action === 'export') {
-      exportCsv()
-    }
-  }
+  const filteredExpenses = useMemo(() => {
+    return expenses
+  }, [expenses])
 
   if (!session) {
-    return <Login onLogin={login} status={status} />
+    return <Login onLogin={login} />
   }
 
-  const customCount = categories.filter(c => c.is_custom && c.user_id === session.user.id).length
-  const canAddCategory = isProMode || customCount < 3
-
   return (
-    <div style={{ padding: 40, maxWidth: 820, margin: '0 auto' }}>
-      {/* Paywall Modal */}
-      {showPaywall ? (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            backgroundColor: '#fff',
-            padding: 40,
-            borderRadius: 16,
-            maxWidth: 500,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.2)'
-          }}>
-            <h2 style={{ marginTop: 0 }}>Upgrade to Pro</h2>
-            <p style={{ fontSize: 18, marginBottom: 20 }}>Unlock advanced AI features for $5/month:</p>
-            <ul style={{ lineHeight: 2, marginBottom: 30 }}>
-              <li>✨ Enhanced receipt OCR (tip/tax breakdown)</li>
-              <li>📊 Spending predictions & forecasts</li>
-              <li>🔄 Recurring expense detection</li>
-              <li>💰 Budget tracking & alerts</li>
-              <li>🏷️ Unlimited custom categories</li>
-              <li>📁 Unlimited receipt storage</li>
-              <li>🤖 Natural language date parsing</li>
-            </ul>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={handleStripeCheckout} style={{ flex: 1, padding: '12px 20px', fontSize: 16, backgroundColor: '#4caf50', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer' }}>
-                Continue to Payment
-              </button>
-              <button onClick={() => setShowPaywall(false)} style={{ padding: '12px 20px', fontSize: 16 }}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 30 }}>
-        <h1 style={{ margin: 0, fontSize: 32, fontWeight: 700 }}>💰 Spender Tracker</h1>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          {isProMode ? (
-            <span style={{ 
-              padding: '6px 12px', 
-              backgroundColor: '#4caf50', 
-              color: '#fff', 
-              borderRadius: 999, 
-              fontSize: 14, 
-              fontWeight: 600 
-            }}>
-              PRO
-            </span>
-          ) : (
-            <button onClick={upgradeToPro} style={{ 
-              padding: '6px 12px', 
-              backgroundColor: '#ff9800', 
-              color: '#fff', 
-              border: 'none', 
-              borderRadius: 999, 
-              fontSize: 14, 
-              fontWeight: 600,
-              cursor: 'pointer'
-            }}>
-              Upgrade to Pro
-            </button>
-          )}
-          <button onClick={logout}>Logout</button>
-        </div>
-      </div>
-
-      {undoBanner ? (
+    <div style={{ padding: '20px', fontFamily: 'system-ui, sans-serif', maxWidth: 1400 }}>
+      {showPaywall && (
         <div
           style={{
-            marginBottom: 12,
-            padding: '10px 12px',
-            border: '1px solid #ddd',
-            borderRadius: 12,
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.6)',
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
-            justifyContent: 'space-between'
+            justifyContent: 'center',
+            zIndex: 9999
           }}
+          onClick={() => setShowPaywall(false)}
         >
-          <div style={{ fontWeight: 600 }}>{undoBanner.message}</div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            {undoBanner.onAction ? (
-              <button onClick={undoBanner.onAction}>{undoBanner.actionLabel || 'Undo'}</button>
-            ) : null}
-            <button onClick={clearUndoBanner} style={{ opacity: 0.7 }}>
-              ✕
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 12,
+              padding: 40,
+              maxWidth: 500,
+              textAlign: 'center'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ marginTop: 0 }}>🚀 Upgrade to PRO</h2>
+            <p style={{ fontSize: 18, color: '#555' }}>
+              Unlock advanced features, AI insights, and unlimited tracking.
+            </p>
+            <p style={{ fontSize: 32, fontWeight: 'bold', margin: '20px 0' }}>$5/month</p>
+            <button
+              onClick={handleStripeCheckout}
+              style={{
+                padding: '14px 32px',
+                fontSize: 16,
+                fontWeight: 'bold',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                cursor: 'pointer'
+              }}
+            >
+              Subscribe Now
             </button>
+            <p style={{ marginTop: 20, fontSize: 12, color: '#999' }}>Cancel anytime.</p>
           </div>
         </div>
-      ) : null}
+      )}
 
-      {/* NEW: AI Insights Panel (Pro only) */}
-      {isProMode && aiInsights ? (
-        <div style={{
-          marginBottom: 24,
-          padding: 20,
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          borderRadius: 16,
-          color: 'white',
-          boxShadow: '0 8px 24px rgba(102, 126, 234, 0.3)'
-        }}>
-          <h3 style={{ marginTop: 0, marginBottom: 16, fontSize: 20 }}>🤖 AI Financial Insights</h3>
-          
-          {/* Spending Prediction */}
-          <div style={{ marginBottom: 16, padding: 14, background: 'rgba(255,255,255,0.15)', borderRadius: 10 }}>
-            <div style={{ fontSize: 14, opacity: 0.9, marginBottom: 6 }}>📈 This Month Forecast</div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>${aiInsights.prediction.predictedTotal.toFixed(0)}</div>
-            <div style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>
-              Current: ${aiInsights.prediction.currentTotal.toFixed(0)} • 
-              {aiInsights.prediction.daysRemaining} days left • 
-              ${aiInsights.prediction.dailyAvg.toFixed(0)}/day avg
+      <header
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 30
+        }}
+      >
+        <h1 style={{ margin: 0 }}>💰 Spender Tracker</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+          {isProMode ? (
+            <span
+              style={{
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: '#fff',
+                padding: '6px 14px',
+                borderRadius: 20,
+                fontSize: 13,
+                fontWeight: 'bold'
+              }}
+            >
+              ⭐ PRO
+            </span>
+          ) : (
+            <button
+              onClick={upgradeToPro}
+              style={{
+                padding: '8px 16px',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              Upgrade to PRO
+            </button>
+          )}
+          <button
+            onClick={logout}
+            style={{
+              padding: '8px 16px',
+              background: '#f44336',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              cursor: 'pointer'
+            }}
+          >
+            Logout
+          </button>
+        </div>
+      </header>
+
+      {undoBanner && (
+        <div
+          style={{
+            background: '#ffeb3b',
+            padding: 12,
+            borderRadius: 8,
+            marginBottom: 20,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center'
+          }}
+        >
+          <span>
+            Archived: <strong>{undoBanner.merchant}</strong> (${undoBanner.amount})
+          </span>
+          <button
+            onClick={() => {
+              setArchivedForExpense(undoBanner.id, false)
+              setUndoBanner(null)
+              if (undoTimerRef.current) clearTimeout(undoTimerRef.current)
+            }}
+            style={{
+              padding: '6px 12px',
+              background: '#4caf50',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer'
+            }}
+          >
+            Undo
+          </button>
+        </div>
+      )}
+
+      {isProMode && aiInsights && (
+        <div
+          style={{
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            color: '#fff',
+            padding: 20,
+            borderRadius: 12,
+            marginBottom: 30
+          }}
+        >
+          <h3 style={{ marginTop: 0 }}>🤖 AI Insights (PRO)</h3>
+          <p>
+            <strong>Month-End Forecast:</strong> ${aiInsights.forecastTotal}
+          </p>
+          {aiInsights.recurringExpenses.length > 0 && (
+            <div>
+              <strong>Recurring Expenses:</strong>
+              <ul style={{ margin: '8px 0', paddingLeft: 20 }}>
+                {aiInsights.recurringExpenses.map((r, i) => (
+                  <li key={i}>
+                    {r.merchant} ({r.count}x)
+                  </li>
+                ))}
+              </ul>
             </div>
-            {aiInsights.prediction.lastMonthTotal > 0 && (
-              <div style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>
-                Last month: ${aiInsights.prediction.lastMonthTotal.toFixed(0)}
-                {aiInsights.prediction.predictedTotal > aiInsights.prediction.lastMonthTotal ? 
-                  ` (↑ ${((aiInsights.prediction.predictedTotal / aiInsights.prediction.lastMonthTotal - 1) * 100).toFixed(0)}%)` :
-                  ` (↓ ${((1 - aiInsights.prediction.predictedTotal / aiInsights.prediction.lastMonthTotal) * 100).toFixed(0)}%)`
-                }
-              </div>
-            )}
-          </div>
-
-          {/* Recurring Expenses */}
-          {aiInsights.recurring.length > 0 && (
-            <div style={{ padding: 14, background: 'rgba(255,255,255,0.15)', borderRadius: 10 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>🔄 Recurring Subscriptions Detected:</div>
-              {aiInsights.recurring.slice(0, 3).map((r, i) => (
-                <div key={i} style={{ fontSize: 13, opacity: 0.9, marginBottom: 4 }}>
-                  • {r.merchant}: ${r.amount.toFixed(2)}/{r.frequency}
-                </div>
-              ))}
-              {aiInsights.recurring.length > 3 && (
-                <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
-                  +{aiInsights.recurring.length - 3} more recurring expenses
-                </div>
-              )}
+          )}
+          {aiInsights.categorySpending.length > 0 && (
+            <div>
+              <strong>Top Categories This Month:</strong>
+              <ul style={{ margin: '8px 0', paddingLeft: 20 }}>
+                {aiInsights.categorySpending.slice(0, 3).map((c, i) => (
+                  <li key={i}>
+                    {c.icon} {c.name}: ${c.total.toFixed(2)}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>
-      ) : null}
+      )}
 
-      {/* AI-FIRST INTERFACE */}
       <ChatAssistant
         expenses={allExpenses}
         categories={categories}
         isProMode={isProMode}
         onUpgradeToPro={upgradeToPro}
         onAICommand={handleAICommand}
+        userId={session?.user?.id}
       />
 
-      {/* MANUAL FORM */}
       <AddExpenseForm
-        amount={amount} setAmount={setAmount}
-        merchant={merchant} setMerchant={setMerchant}
-        spentAtLocal={spentAtLocal} setSpentAtLocal={setSpentAtLocal}
-        paymentMethod={paymentMethod} setPaymentMethod={setPaymentMethod}
-        categoryId={categoryId} setCategoryId={setCategoryId}
+        amount={amount}
+        setAmount={setAmount}
+        merchant={merchant}
+        setMerchant={setMerchant}
+        categoryId={categoryId}
+        setCategoryId={setCategoryId}
+        paymentMethod={paymentMethod}
+        setPaymentMethod={setPaymentMethod}
+        spentAtLocal={spentAtLocal}
+        setSpentAtLocal={setSpentAtLocal}
+        notes={notes}
+        setNotes={setNotes}
+        isTaxDeductible={isTaxDeductible}
+        setIsTaxDeductible={setIsTaxDeductible}
+        receiptFile={receiptFile}
+        setReceiptFile={setReceiptFile}
+        receiptUrls={receiptUrls}
+        setReceiptUrls={setReceiptUrls}
+        isReimbursable={isReimbursable}
+        setIsReimbursable={setIsReimbursable}
+        employerOrClient={employerOrClient}
+        setEmployerOrClient={setEmployerOrClient}
+        tagsText={tagsText}
+        setTagsText={setTagsText}
         categories={categories}
-
-        showMoreOptions={showMoreOptions} setShowMoreOptions={setShowMoreOptions}
-        isTaxDeductible={isTaxDeductible} setIsTaxDeductible={setIsTaxDeductible}
-        notes={notes} setNotes={setNotes}
-
         isProMode={isProMode}
-        isReimbursable={isReimbursable} setIsReimbursable={setIsReimbursable}
-        employerOrClient={employerOrClient} setEmployerOrClient={setEmployerOrClient}
-        tagsText={tagsText} setTagsText={setTagsText}
-
-        showAddCategory={showAddCategory} setShowAddCategory={setShowAddCategory}
-        newCategoryName={newCategoryName} setNewCategoryName={setNewCategoryName}
-        customCount={customCount}
-        canAddCategory={canAddCategory}
-        onAddCustomCategory={addCustomCategory}
-        onUpgradeToPro={upgradeToPro}
-
-        receiptFile={receiptFile} setReceiptFile={setReceiptFile}
-
-        onSave={addExpense}
+        showMoreOptions={showMoreOptions}
+        setShowMoreOptions={setShowMoreOptions}
+        onSubmit={addExpense}
         isSaving={isSaving}
         saveSuccess={saveSuccess}
-
+        status={status}
         categoryLearnedSource={categoryLearnedSource}
+        showAddCategory={showAddCategory}
+        setShowAddCategory={setShowAddCategory}
+        newCategoryName={newCategoryName}
+        setNewCategoryName={setNewCategoryName}
+        addCustomCategory={addCustomCategory}
+        isProcessingReceipt={isProcessingReceipt}
+        processReceiptWithOCR={processReceiptWithOCR}
       />
-
-      <p>{status}</p>
-
-      <hr style={{ margin: '30px 0' }} />
-
-      {/* EXPENSE LIST */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-        <h2 style={{ margin: 0 }}>{showArchived ? 'Archived expenses' : 'Recent expenses'}</h2>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <label style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-            <input
-              type="checkbox"
-              checked={showArchived}
-              onChange={e => setShowArchived(e.target.checked)}
-            />
-            Show archived
-          </label>
-          <button onClick={loadExpenses}>Refresh</button>
-          <button onClick={exportCsv}>Export CSV</button>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search paid to or notes..."
-          style={{ width: 260 }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') runSearch()
-          }}
-        />
-        <button onClick={runSearch}>Search</button>
-        <button onClick={clearSearch}>Clear</button>
-      </div>
 
       <ExpenseList
-        expenses={expenses}
+        expenses={filteredExpenses}
         categories={categories}
-        showArchived={showArchived}
-        receiptUrls={receiptUrls}
+        onUpdate={updateExpense}
         onArchive={archiveWithUndo}
-        onUnarchive={(id) => setArchivedForExpense(id, false)}
         onDelete={deleteExpense}
         onOpenReceipt={openReceipt}
-        onUpdateExpense={updateExpense}
+        showArchived={showArchived}
+        setShowArchived={setShowArchived}
+        search={search}
+        setSearch={setSearch}
+        runSearch={runSearch}
+        clearSearch={clearSearch}
+        exportCsv={exportCsv}
+        isProMode={isProMode}
       />
 
-      <MonthlySummary 
-        expenses={expenses} 
-        categories={categories} 
-        isProMode={isProMode}
-        onUpgradeToPro={upgradeToPro}
-      />
+      <MonthlySummary expenses={expenses} categories={categories} />
     </div>
   )
 }
 
-/* NEW FEATURE 1: Natural language date parser */
-function parseNaturalDate(text) {
-  const lower = text.toLowerCase().trim()
+export default App
+
+function parseNaturalDate(hint) {
+  const lower = hint.toLowerCase()
   const now = new Date()
-  
-  // Helper to format date
-  const formatDate = (d) => {
-    const pad = (n) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-  }
-
-  // Today
-  if (lower.includes('today')) return formatDate(now)
-
-  // Yesterday
+  if (lower.includes('today')) return now
   if (lower.includes('yesterday')) {
     const d = new Date(now)
     d.setDate(d.getDate() - 1)
-    return formatDate(d)
+    return d
   }
-
-  // X days ago
-  const daysAgoMatch = lower.match(/(\d+)\s*days?\s*ago/)
-  if (daysAgoMatch) {
-    const days = parseInt(daysAgoMatch[1])
+  const match = lower.match(/(\d+)\s*(day|week|month)s?\s*ago/)
+  if (match) {
+    const val = parseInt(match[1], 10)
+    const unit = match[2]
     const d = new Date(now)
-    d.setDate(d.getDate() - days)
-    return formatDate(d)
+    if (unit === 'day') d.setDate(d.getDate() - val)
+    else if (unit === 'week') d.setDate(d.getDate() - val * 7)
+    else if (unit === 'month') d.setMonth(d.getMonth() - val)
+    return d
   }
-
-  // Last week
-  if (lower.includes('last week')) {
-    const d = new Date(now)
-    d.setDate(d.getDate() - 7)
-    return formatDate(d)
-  }
-
-  // Last month
-  if (lower.includes('last month')) {
-    const d = new Date(now)
-    d.setMonth(d.getMonth() - 1)
-    return formatDate(d)
-  }
-
-  // Specific day: "last tuesday", "monday", etc.
-  const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
-  for (let i = 0; i < dayNames.length; i++) {
-    if (lower.includes(dayNames[i])) {
-      const targetDay = i
-      const currentDay = now.getDay()
-      let daysBack = currentDay - targetDay
-      if (daysBack <= 0) daysBack += 7 // Last occurrence
-      if (lower.includes('last')) daysBack += 7
-      
-      const d = new Date(now)
-      d.setDate(d.getDate() - daysBack)
-      return formatDate(d)
-    }
-  }
-
-  return null // Could not parse
+  return null
 }
 
-/* helpers */
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -1215,92 +819,53 @@ function fileToBase64(file) {
   })
 }
 
-function csvEscape(value) {
-  const s = String(value ?? '')
-  if (s.includes('"') || s.includes(',') || s.includes('\n') || s.includes('\r')) {
-    return `"${s.replace(/"/g, '""')}"`
+function csvEscape(str) {
+  if (!str) return ''
+  return `"${str.replace(/"/g, '""')}"`
+}
+
+function escapeIlike(str) {
+  return `%${str.replace(/%/g, '\\%').replace(/_/g, '\\_')}%`
+}
+
+function pickCategoryIdFromMerchant(merchant, categories) {
+  const lower = merchant.toLowerCase()
+  if (lower.includes('coffee') || lower.includes('starbucks')) {
+    return categories.find((c) => c.name.toLowerCase().includes('coffee'))?.id
   }
-  return s
-}
-
-function escapeIlike(s) {
-  return String(s || '').replace(/[%_]/g, (m) => '\\' + m)
-}
-
-function pickCategoryIdFromMerchant(merchant, categories, rules) {
-  const m = (merchant || '').toLowerCase().trim()
-  if (!m) return null
-
-  for (const [catName, keywords] of Object.entries(rules)) {
-    if (!keywords || keywords.length === 0) continue
-    for (const kw of keywords) {
-      const k = (kw || '').toLowerCase().trim()
-      if (!k) continue
-      if (m.includes(k)) {
-        const cat = categories.find(c => c.name.toLowerCase() === catName.toLowerCase())
-        return cat ? cat.id : null
-      }
-    }
+  if (lower.includes('gas') || lower.includes('shell')) {
+    return categories.find((c) => c.name.toLowerCase().includes('gas'))?.id
   }
   return null
 }
 
 function sanitizeFilename(name) {
-  return String(name || '')
-    .replace(/[^a-zA-Z0-9._-]/g, '_')
-    .slice(0, 120)
+  return name.replace(/[^a-zA-Z0-9._-]/g, '_')
 }
 
-function parseTags(tagsText) {
-  const parts = String(tagsText || '')
+function parseTags(text) {
+  if (!text) return []
+  return text
     .split(',')
-    .map(s => s.trim())
+    .map((t) => t.trim())
     .filter(Boolean)
-
-  const seen = new Set()
-  const out = []
-  for (const p of parts) {
-    const key = p.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(p)
-    if (out.length >= 10) break
-  }
-  return out.length ? out : null
 }
 
 function getNowLocalDateTime() {
-  const d = new Date()
-  const pad = (n) => String(n).padStart(2, '0')
-  const yyyy = d.getFullYear()
-  const mm = pad(d.getMonth() + 1)
-  const dd = pad(d.getDate())
-  const hh = pad(d.getHours())
-  const min = pad(d.getMinutes())
-  return `${yyyy}-${mm}-${dd}T${hh}:${min}`
+  const now = new Date()
+  const offset = now.getTimezoneOffset() * 60000
+  const localISOTime = new Date(now - offset).toISOString().slice(0, 16)
+  return localISOTime
 }
 
-async function getLocationString() {
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) return resolve(null)
-
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const { latitude, longitude } = pos.coords
-          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`)
-          const json = await res.json()
-          const city = json?.address?.city || json?.address?.town || json?.address?.village || ''
-          const state = json?.address?.state || ''
-          resolve([city, state].filter(Boolean).join(', ') || null)
-        } catch {
-          resolve(null)
-        }
-      },
-      () => resolve(null),
-      { timeout: 5000 }
+async function getLocationString(lat, lng) {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`
     )
-  })
+    const data = await res.json()
+    return data.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+  } catch (err) {
+    return `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+  }
 }
-
-export default App
