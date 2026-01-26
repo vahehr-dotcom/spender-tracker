@@ -257,34 +257,48 @@ export default function ChatAssistant({
   }
 
   const parseAndExecuteCommand = useCallback(async (text, expenseData) => {
+    if (!isProMode) return false
+
     const lower = text.toLowerCase()
 
-    // UPDATE EXPENSE COMMAND
-    if (lower.includes('update') || lower.includes('change') || lower.includes('edit')) {
+    // UPDATE EXPENSE COMMAND - More flexible detection
+    if (lower.includes('update') || lower.includes('change') || lower.includes('edit') || lower.includes('correct')) {
       const updates = {}
       let query = ''
 
       // Extract expense identifier
-      if (lower.includes('most recent') || lower.includes('latest')) {
+      if (lower.includes('most recent') || lower.includes('latest') || lower.includes('last')) {
         query = 'most_recent'
       } else {
-        // Try to extract merchant name
-        const merchantMatch = text.match(/(?:update|change|edit)\s+(?:my\s+)?(?:the\s+)?([a-z\s]+?)(?:\s+to|\s+expense|\s+purchase)/i)
-        if (merchantMatch) {
-          query = merchantMatch[1].trim()
+        // Extract merchant name - look for common merchant names
+        const words = text.split(/\s+/)
+        for (let i = 0; i < words.length; i++) {
+          const word = words[i].toLowerCase()
+          // Check if this word matches any merchant in expenses
+          const matchingExpense = expenseData.find(exp => 
+            exp.merchant.toLowerCase().includes(word)
+          )
+          if (matchingExpense) {
+            query = matchingExpense.merchant.toLowerCase()
+            break
+          }
         }
       }
 
-      // Extract new amount
-      const amountMatch = text.match(/to\s+\$?(\d+(?:\.\d{2})?)/i)
-      if (amountMatch) {
-        updates.amount = parseFloat(amountMatch[1])
-      }
+      // Extract new amount - flexible patterns
+      const amountPatterns = [
+        /\$(\d+(?:\.\d{2})?)/,  // $128 or $128.00
+        /(\d+(?:\.\d{2})?)\s*dollars?/i,  // 128 dollars
+        /to\s+(\d+(?:\.\d{2})?)/i,  // to 128
+        /(\d+)\s*even/i  // 128 even
+      ]
 
-      // Extract new merchant
-      const merchantUpdateMatch = text.match(/merchant\s+to\s+([a-z\s]+)/i)
-      if (merchantUpdateMatch) {
-        updates.merchant = merchantUpdateMatch[1].trim()
+      for (const pattern of amountPatterns) {
+        const match = text.match(pattern)
+        if (match) {
+          updates.amount = parseFloat(match[1])
+          break
+        }
       }
 
       if (query && Object.keys(updates).length > 0) {
@@ -319,7 +333,7 @@ export default function ChatAssistant({
     }
 
     return false
-  }, [onAICommand])
+  }, [onAICommand, isProMode])
 
   const handleAISubmit = async (e) => {
     e?.preventDefault()
@@ -379,26 +393,27 @@ ${expenseData.length > 0 ? JSON.stringify(expenseData, null, 2) : 'No expenses r
 ${memoryContext}
 ${preferencesContext}
 
-**Your capabilities:**
+**Your capabilities (PRO user):**
 1. Answer questions about expenses naturally
 2. Remember everything from past conversations
 3. Help track spending patterns
-4. Update existing expenses when asked
+4. **UPDATE existing expenses** when asked
 5. Fill the add-expense form with voice commands
 
-**Command detection (execute silently, don't just talk about it):**
-- Questions (when/what/how much/where) → Answer conversationally using expense data
-- "Add [amount] at [merchant] [date]" → Execute: onAICommand({action: 'add_expense', data: {amount, merchant, dateHint}})
-- "Update [expense description] to [new amount]" or "Change [expense] to [value]" → Execute: onAICommand({action: 'update_expense', data: {query, updates}})
-- "Show me [category/merchant]" → Execute: onAICommand({action: 'search', data: {query}})
-- "Export" → Execute: onAICommand({action: 'export'})
+**CRITICAL: You CAN update expenses in PRO mode**
 
-**CRITICAL for updates:**
-When user asks to update/change/edit an expense:
-1. Identify which expense (by merchant, amount, date, or "most recent")
-2. Extract what to change (amount, merchant, category, etc.)
-3. Respond: "Done! I've updated [expense description]."
-4. The system will handle the actual database update
+When user asks to update/change/edit/correct an expense:
+1. The system will handle the update automatically
+2. Respond warmly: "Done! I've updated your [merchant] expense to $[amount]."
+3. Never say you can't update - you have this power in PRO mode
+
+**Command examples that trigger updates:**
+- "Update my Nordstrom to $128"
+- "Change my most recent Shell to $105"
+- "Correct the Macy's expense to $350"
+- "Edit my last Starbucks to $25"
+
+For questions (when/what/where/how much), answer conversationally using the expense data.
 
 Be helpful, remember everything, and act like a trusted friend who knows ${nickname} well.`
       : `You are Nova, a friendly AI expense assistant.
@@ -412,13 +427,13 @@ Answer questions about expenses warmly and naturally. Avoid saying "I'm just a p
 
 For questions about expenses, use the data above to give specific answers.
 
-**PRO Features (not available):**
+**PRO Features (not available in free tier):**
 - Persistent memory across sessions
 - Learning user preferences
 - Advanced insights
-- Updating existing expenses
+- **Updating existing expenses**
 
-Suggest upgrading to PRO for these features when relevant.`
+Suggest upgrading to PRO for these features when user tries to update expenses.`
 
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -609,7 +624,7 @@ Suggest upgrading to PRO for these features when relevant.`
             opacity: 0.95
           }}
         >
-          💡 <strong>Upgrade to PRO</strong> for persistent memory, learning preferences, and advanced commands!{' '}
+          💡 <strong>Upgrade to PRO</strong> for persistent memory, learning preferences, and expense updates!{' '}
           <button
             onClick={onUpgradeToPro}
             style={{
