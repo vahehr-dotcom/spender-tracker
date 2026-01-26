@@ -4,12 +4,17 @@ export default function ExpenseList({
   expenses,
   categories,
   showArchived,
-  receiptUrls,
+  setShowArchived,
+  search,
+  setSearch,
+  runSearch,
+  clearSearch,
+  exportCsv,
+  isProMode,
+  onUpdate,
   onArchive,
-  onUnarchive,
   onDelete,
-  onOpenReceipt,
-  onUpdateExpense // NEW: callback to update expense
+  onOpenReceipt
 }) {
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState({})
@@ -24,9 +29,9 @@ export default function ExpenseList({
     setEditForm({
       amount: Number(expense.amount).toFixed(2),
       merchant: expense.merchant,
-      category_id: expense.category_id,
+      category_id: expense.category_id || '',
       payment_method: expense.payment_method,
-      spent_at: new Date(expense.spent_at).toISOString().slice(0, 16), // datetime-local format
+      spent_at: new Date(expense.spent_at).toISOString().slice(0, 16),
       is_tax_deductible: expense.is_tax_deductible || false,
       is_reimbursable: expense.is_reimbursable || false,
       employer_or_client: expense.employer_or_client || '',
@@ -42,10 +47,9 @@ export default function ExpenseList({
 
   const saveEdit = async (expenseId) => {
     const updated = {
-      id: expenseId,
       amount: parseFloat(editForm.amount),
       merchant: editForm.merchant,
-      category_id: editForm.category_id,
+      category_id: editForm.category_id || null,
       payment_method: editForm.payment_method,
       spent_at: new Date(editForm.spent_at).toISOString(),
       is_tax_deductible: editForm.is_tax_deductible,
@@ -55,19 +59,51 @@ export default function ExpenseList({
       tags: editForm.tags ? editForm.tags.split(',').map(t => t.trim()).filter(Boolean) : null
     }
 
-    await onUpdateExpense(updated)
+    await onUpdate(expenseId, updated)
     setEditingId(null)
     setEditForm({})
   }
 
   if (!expenses || expenses.length === 0) {
-    return <p>No expenses yet.</p>
+    return (
+      <div style={{ marginTop: 30 }}>
+        <h2>📊 Expenses</h2>
+        <p style={{ opacity: 0.7 }}>No expenses yet. Add your first one above!</p>
+      </div>
+    )
   }
 
   return (
-    <div style={{ marginTop: 15 }}>
+    <div style={{ marginTop: 30 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <h2 style={{ margin: 0 }}>📊 Expenses ({expenses.length})</h2>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={exportCsv} style={btnStyle}>📥 Export CSV</button>
+          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              style={{ marginRight: 6 }}
+            />
+            Show archived
+          </label>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 20, display: 'flex', gap: 10 }}>
+        <input
+          type="text"
+          placeholder="Search expenses..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ ...inputStyle, flex: 1 }}
+        />
+        <button onClick={runSearch} style={btnStyle}>🔍 Search</button>
+        {search && <button onClick={clearSearch} style={btnStyle}>Clear</button>}
+      </div>
+
       {expenses.map(e => {
-        const thumb = receiptUrls[e.id]
         const isEditing = editingId === e.id
 
         return (
@@ -78,11 +114,10 @@ export default function ExpenseList({
               borderRadius: 10,
               padding: 12,
               marginBottom: 12,
-              backgroundColor: isEditing ? '#FFF9E6' : 'white'
+              backgroundColor: isEditing ? '#FFF9E6' : e.archived ? '#f5f5f5' : 'white'
             }}
           >
             {!isEditing ? (
-              // DISPLAY MODE
               <>
                 <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
                   <div style={{ fontSize: 18, fontWeight: 600 }}>
@@ -92,75 +127,55 @@ export default function ExpenseList({
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <button onClick={() => startEdit(e)} style={btnStyle}>✏️ Edit</button>
 
-                    {e.receipt_image_url ? (
-                      <button onClick={() => onOpenReceipt(e)} style={btnStyle}>View receipt</button>
-                    ) : null}
+                    {e.receipt_image_url && (
+                      <button onClick={() => onOpenReceipt(e.receipt_image_url)} style={btnStyle}>📎 Receipt</button>
+                    )}
 
-                    {!showArchived ? (
-                      <button onClick={() => onArchive(e.id)} style={btnStyle}>Archive</button>
+                    {!e.archived ? (
+                      <button onClick={() => onArchive(e)} style={btnStyle}>📦 Archive</button>
                     ) : (
-                      <>
-                        <button onClick={() => onUnarchive(e.id)} style={btnStyle}>Unarchive</button>
-                        <button onClick={() => onDelete(e.id)} style={{ ...btnStyle, backgroundColor: '#FF5252', color: 'white' }}>Delete</button>
-                      </>
+                      <button onClick={() => onDelete(e.id)} style={{ ...btnStyle, backgroundColor: '#FF5252', color: 'white' }}>🗑️ Delete</button>
                     )}
                   </div>
                 </div>
 
-                <div style={{ marginTop: 6, opacity: 0.85 }}>
+                <div style={{ marginTop: 6, opacity: 0.7, fontSize: 14 }}>
                   {categoryName(e.category_id)} • {e.payment_method} • {new Date(e.spent_at).toLocaleString()}
                 </div>
 
-                {e.location ? (
-                  <div style={{ marginTop: 6, opacity: 0.85 }}>
-                    📍 {e.location}
+                {e.location && (
+                  <div style={{ marginTop: 6, opacity: 0.7, fontSize: 14 }}>
+                    📍 {typeof e.location === 'string' ? JSON.parse(e.location).label : e.location.label}
                   </div>
-                ) : null}
+                )}
 
-                {(e.is_tax_deductible || e.is_reimbursable) ? (
+                {(e.is_tax_deductible || e.is_reimbursable) && (
                   <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {e.is_tax_deductible ? <span style={pillStyle}>Tax</span> : null}
-                    {e.is_reimbursable ? (
+                    {e.is_tax_deductible && <span style={pillStyle}>💼 Tax Deductible</span>}
+                    {e.is_reimbursable && (
                       <span style={pillStyle}>
-                        Reimbursable{e.employer_or_client ? `: ${e.employer_or_client}` : ''}
+                        💰 Reimbursable{e.employer_or_client ? `: ${e.employer_or_client}` : ''}
                       </span>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {e.tags && e.tags.length ? (
-                  <div style={{ marginTop: 8, opacity: 0.9 }}>
-                    <strong>Tags:</strong> {e.tags.join(', ')}
-                  </div>
-                ) : null}
-
-                {e.notes ? (
-                  <div style={{ marginTop: 8, opacity: 0.9 }}>
-                    <strong>Note:</strong> {e.notes}
-                  </div>
-                ) : null}
-
-                {e.receipt_image_url ? (
-                  <div style={{ marginTop: 10 }}>
-                    <div style={{ fontWeight: 600, marginBottom: 6 }}>📎 Receipt attached</div>
-                    {thumb ? (
-                      <img
-                        src={thumb}
-                        alt="receipt thumbnail"
-                        style={{ width: 160, borderRadius: 8, border: '1px solid #ddd' }}
-                      />
-                    ) : (
-                      <div style={{ opacity: 0.7 }}>Loading thumbnail...</div>
                     )}
                   </div>
-                ) : null}
+                )}
+
+                {e.tags && e.tags.length > 0 && (
+                  <div style={{ marginTop: 8, fontSize: 14 }}>
+                    <strong>Tags:</strong> {e.tags.join(', ')}
+                  </div>
+                )}
+
+                {e.notes && (
+                  <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>
+                    <strong>Note:</strong> {e.notes}
+                  </div>
+                )}
               </>
             ) : (
-              // EDIT MODE
               <div style={{ padding: 10 }}>
                 <h4 style={{ marginTop: 0, marginBottom: 15 }}>✏️ Edit Expense</h4>
 
-                {/* Amount */}
                 <div style={fieldStyle}>
                   <label style={labelStyle}>Amount</label>
                   <input
@@ -172,7 +187,6 @@ export default function ExpenseList({
                   />
                 </div>
 
-                {/* Merchant */}
                 <div style={fieldStyle}>
                   <label style={labelStyle}>Paid to</label>
                   <input
@@ -183,7 +197,6 @@ export default function ExpenseList({
                   />
                 </div>
 
-                {/* Category */}
                 <div style={fieldStyle}>
                   <label style={labelStyle}>Category</label>
                   <select
@@ -191,13 +204,13 @@ export default function ExpenseList({
                     onChange={(e) => setEditForm({ ...editForm, category_id: e.target.value })}
                     style={inputStyle}
                   >
+                    <option value="">— Select category —</option>
                     {categories.map(cat => (
-                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                      <option key={cat.id} value={cat.id}>{cat.icon} {cat.name}</option>
                     ))}
                   </select>
                 </div>
 
-                {/* Payment Method */}
                 <div style={fieldStyle}>
                   <label style={labelStyle}>Payment Method</label>
                   <select
@@ -212,7 +225,6 @@ export default function ExpenseList({
                   </select>
                 </div>
 
-                {/* Date & Time */}
                 <div style={fieldStyle}>
                   <label style={labelStyle}>Date & Time</label>
                   <input
@@ -223,7 +235,6 @@ export default function ExpenseList({
                   />
                 </div>
 
-                {/* Tax Deductible */}
                 <div style={fieldStyle}>
                   <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
                     <input
@@ -236,43 +247,44 @@ export default function ExpenseList({
                   </label>
                 </div>
 
-                {/* Reimbursable */}
-                <div style={fieldStyle}>
-                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={editForm.is_reimbursable}
-                      onChange={(e) => setEditForm({ ...editForm, is_reimbursable: e.target.checked })}
-                      style={{ marginRight: 8 }}
-                    />
-                    Reimbursable
-                  </label>
-                </div>
+                {isProMode && (
+                  <>
+                    <div style={fieldStyle}>
+                      <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={editForm.is_reimbursable}
+                          onChange={(e) => setEditForm({ ...editForm, is_reimbursable: e.target.checked })}
+                          style={{ marginRight: 8 }}
+                        />
+                        Reimbursable
+                      </label>
+                    </div>
 
-                {editForm.is_reimbursable && (
-                  <div style={fieldStyle}>
-                    <label style={labelStyle}>Employer / Client</label>
-                    <input
-                      type="text"
-                      value={editForm.employer_or_client}
-                      onChange={(e) => setEditForm({ ...editForm, employer_or_client: e.target.value })}
-                      style={inputStyle}
-                    />
-                  </div>
+                    {editForm.is_reimbursable && (
+                      <div style={fieldStyle}>
+                        <label style={labelStyle}>Employer / Client</label>
+                        <input
+                          type="text"
+                          value={editForm.employer_or_client}
+                          onChange={(e) => setEditForm({ ...editForm, employer_or_client: e.target.value })}
+                          style={inputStyle}
+                        />
+                      </div>
+                    )}
+
+                    <div style={fieldStyle}>
+                      <label style={labelStyle}>Tags (comma separated)</label>
+                      <input
+                        type="text"
+                        value={editForm.tags}
+                        onChange={(e) => setEditForm({ ...editForm, tags: e.target.value })}
+                        style={inputStyle}
+                      />
+                    </div>
+                  </>
                 )}
 
-                {/* Tags */}
-                <div style={fieldStyle}>
-                  <label style={labelStyle}>Tags (comma separated)</label>
-                  <input
-                    type="text"
-                    value={editForm.tags}
-                    onChange={(e) => setEditForm({ ...editForm, tags: e.target.value })}
-                    style={inputStyle}
-                  />
-                </div>
-
-                {/* Notes */}
                 <div style={fieldStyle}>
                   <label style={labelStyle}>Notes</label>
                   <textarea
@@ -282,7 +294,6 @@ export default function ExpenseList({
                   />
                 </div>
 
-                {/* Action buttons */}
                 <div style={{ display: 'flex', gap: 10, marginTop: 15 }}>
                   <button
                     onClick={() => saveEdit(e.id)}
@@ -308,11 +319,11 @@ export default function ExpenseList({
 
 const pillStyle = {
   display: 'inline-block',
-  padding: '4px 8px',
+  padding: '4px 10px',
   border: '1px solid #ddd',
   borderRadius: 999,
   fontSize: 12,
-  opacity: 0.9
+  backgroundColor: '#f0f0f0'
 }
 
 const btnStyle = {
