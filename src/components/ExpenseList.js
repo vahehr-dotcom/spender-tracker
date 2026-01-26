@@ -64,6 +64,22 @@ export default function ExpenseList({
     setEditForm({})
   }
 
+  const getLocationLabel = (location) => {
+    if (!location) return null
+    try {
+      // If it's already an object
+      if (typeof location === 'object') {
+        return location.label || `${location.lat}, ${location.lng}`
+      }
+      // If it's a JSON string, parse it
+      const parsed = JSON.parse(location)
+      return parsed.label || `${parsed.lat}, ${parsed.lng}`
+    } catch (e) {
+      // If parsing fails, return as-is (it's already a plain string)
+      return location
+    }
+  }
+
   if (!expenses || expenses.length === 0) {
     return (
       <div style={{ marginTop: 30 }}>
@@ -105,6 +121,7 @@ export default function ExpenseList({
 
       {expenses.map(e => {
         const isEditing = editingId === e.id
+        const locationLabel = getLocationLabel(e.location)
 
         return (
           <div
@@ -143,9 +160,9 @@ export default function ExpenseList({
                   {categoryName(e.category_id)} • {e.payment_method} • {new Date(e.spent_at).toLocaleString()}
                 </div>
 
-                {e.location && (
+                {locationLabel && (
                   <div style={{ marginTop: 6, opacity: 0.7, fontSize: 14 }}>
-                    📍 {typeof e.location === 'string' ? JSON.parse(e.location).label : e.location.label}
+                    📍 {locationLabel}
                   </div>
                 )}
 
