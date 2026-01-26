@@ -14,7 +14,7 @@ function App() {
 
   const [categories, setCategories] = useState([])
   const [expenses, setExpenses] = useState([])
-  const [allExpenses, setAllExpenses] = useState([]) // For AI assistant
+  const [allExpenses, setAllExpenses] = useState([])
 
   const [amount, setAmount] = useState('')
   const [merchant, setMerchant] = useState('')
@@ -75,12 +75,16 @@ function App() {
 
   const loadSubscription = async () => {
     if (!session) return
-    const { data } = await supabase
-      .from('subscriptions')
-      .select('status')
-      .eq('user_id', session.user.id)
-      .single()
-    if (data) setSubscriptionStatus(data.status)
+    try {
+      const { data } = await supabase
+        .from('subscriptions')
+        .select('status')
+        .eq('user_id', session.user.id)
+        .single()
+      if (data) setSubscriptionStatus(data.status)
+    } catch (err) {
+      console.log('No subscription found, using free tier')
+    }
   }
 
   function normalizeMerchantKey(m) {
@@ -291,9 +295,8 @@ function App() {
     if (!allError && allData) {
       setAllExpenses(allData)
       buildMerchantMemory(allData)
-      calculateAIInsights(allData, categories)
     }
-  }, [session, showArchived, search, buildMerchantMemory, calculateAIInsights, categories])
+  }, [session, showArchived, search, buildMerchantMemory])
 
   useEffect(() => {
     if (allExpenses.length > 0 && categories.length > 0) {
