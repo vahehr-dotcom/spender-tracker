@@ -167,6 +167,11 @@ export default function ChatAssistant({
         setVoiceTranscript(transcript)
         setAiInput(transcript)
         setIsListening(false)
+        
+        // AUTO-SUBMIT after voice input
+        setTimeout(() => {
+          handleAISubmit({ preventDefault: () => {} })
+        }, 500)
       }
 
       recognition.onerror = (event) => {
@@ -257,53 +262,62 @@ export default function ChatAssistant({
   }
 
   const parseAndExecuteCommand = useCallback(async (text, expenseData) => {
-    if (!isProMode) return false
+    console.log('🔍 Parsing command:', text)
+    console.log('📊 Expense data available:', expenseData.length)
+    console.log('🎯 Is PRO mode:', isProMode)
+
+    if (!isProMode) {
+      console.log('⚠️ Not PRO - skipping command parsing')
+      return false
+    }
 
     const lower = text.toLowerCase()
 
-    // UPDATE EXPENSE COMMAND - More flexible detection
+    // UPDATE EXPENSE COMMAND
     if (lower.includes('update') || lower.includes('change') || lower.includes('edit') || lower.includes('correct')) {
+      console.log('✅ UPDATE command detected!')
+      
       const updates = {}
       let query = ''
 
       // Extract expense identifier
       if (lower.includes('most recent') || lower.includes('latest') || lower.includes('last')) {
         query = 'most_recent'
+        console.log('📍 Target: most recent expense')
       } else {
-        // Extract merchant name - look for common merchant names
-        const words = text.split(/\s+/)
-        for (let i = 0; i < words.length; i++) {
-          const word = words[i].toLowerCase()
-          // Check if this word matches any merchant in expenses
-          const matchingExpense = expenseData.find(exp => 
-            exp.merchant.toLowerCase().includes(word)
-          )
-          if (matchingExpense) {
-            query = matchingExpense.merchant.toLowerCase()
+        // Look for merchant name in the text
+        for (const exp of expenseData) {
+          if (lower.includes(exp.merchant.toLowerCase())) {
+            query = exp.merchant.toLowerCase()
+            console.log('📍 Target merchant found:', exp.merchant)
             break
           }
         }
       }
 
-      // Extract new amount - flexible patterns
+      // Extract new amount
       const amountPatterns = [
-        /\$(\d+(?:\.\d{2})?)/,  // $128 or $128.00
-        /(\d+(?:\.\d{2})?)\s*dollars?/i,  // 128 dollars
-        /to\s+(\d+(?:\.\d{2})?)/i,  // to 128
-        /(\d+)\s*even/i  // 128 even
+        /\$(\d+(?:\.\d{2})?)/,
+        /(\d+(?:\.\d{2})?)\s*dollars?/i,
+        /to\s+(\d+(?:\.\d{2})?)/i,
+        /(\d+)\s*even/i
       ]
 
       for (const pattern of amountPatterns) {
         const match = text.match(pattern)
         if (match) {
           updates.amount = parseFloat(match[1])
+          console.log('💰 New amount:', updates.amount)
           break
         }
       }
 
       if (query && Object.keys(updates).length > 0) {
+        console.log('🚀 Executing update command:', { query, updates })
         onAICommand({ action: 'update_expense', data: { query, updates } })
         return true
+      } else {
+        console.log('❌ Missing query or updates:', { query, updates })
       }
     }
 
@@ -313,6 +327,7 @@ export default function ChatAssistant({
       const amount = parseFloat(addMatch[1])
       const merchant = addMatch[2].trim()
       const dateHint = addMatch[3] || 'today'
+      console.log('➕ ADD command detected:', { amount, merchant, dateHint })
       onAICommand({ action: 'add_expense', data: { amount, merchant, dateHint } })
       return true
     }
@@ -321,6 +336,7 @@ export default function ChatAssistant({
     if (lower.includes('show me') || lower.includes('filter') || lower.includes('find all')) {
       const query = text.replace(/show\s+me|filter|find\s+all|the|my|expenses?/gi, '').trim()
       if (query) {
+        console.log('🔎 SEARCH command detected:', query)
         onAICommand({ action: 'search', data: { query } })
         return true
       }
@@ -328,10 +344,12 @@ export default function ChatAssistant({
 
     // EXPORT COMMAND
     if (lower.includes('export') || lower.includes('download csv')) {
+      console.log('📥 EXPORT command detected')
       onAICommand({ action: 'export' })
       return true
     }
 
+    console.log('❌ No command detected')
     return false
   }, [onAICommand, isProMode])
 
@@ -441,6 +459,7 @@ Suggest upgrading to PRO for these features when user tries to update expenses.`
     ]
 
     try {
+      // PARSE COMMAND FIRST (before calling OpenAI)
       const cmdExecuted = await parseAndExecuteCommand(userMessage, expenseData)
 
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
