@@ -15,6 +15,7 @@ export default function ChatAssistant({
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [lastResponse, setLastResponse] = useState('')
   const [voiceTranscript, setVoiceTranscript] = useState('')
+  const [shouldAutoSubmit, setShouldAutoSubmit] = useState(false)
 
   const [conversationHistory, setConversationHistory] = useState([])
   const [userInsights, setUserInsights] = useState([])
@@ -38,6 +39,14 @@ export default function ChatAssistant({
       loadUserProfile()
     }
   }, [isProMode, userId])
+
+  // Auto-submit when voice transcript is ready
+  useEffect(() => {
+    if (shouldAutoSubmit && aiInput.trim()) {
+      setShouldAutoSubmit(false)
+      handleAISubmit({ preventDefault: () => {} })
+    }
+  }, [shouldAutoSubmit, aiInput])
 
   const loadUserProfile = async () => {
     if (!userId) return
@@ -168,9 +177,9 @@ export default function ChatAssistant({
         setAiInput(transcript)
         setIsListening(false)
         
-        // AUTO-SUBMIT after voice input
+        // Trigger auto-submit via state
         setTimeout(() => {
-          handleAISubmit({ preventDefault: () => {} })
+          setShouldAutoSubmit(true)
         }, 500)
       }
 
@@ -459,7 +468,6 @@ Suggest upgrading to PRO for these features when user tries to update expenses.`
     ]
 
     try {
-      // PARSE COMMAND FIRST (before calling OpenAI)
       const cmdExecuted = await parseAndExecuteCommand(userMessage, expenseData)
 
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
