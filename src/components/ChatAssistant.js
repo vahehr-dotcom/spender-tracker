@@ -17,6 +17,7 @@ export default function ChatAssistant({
   const [voiceTranscript, setVoiceTranscript] = useState('')
   const [shouldAutoSubmit, setShouldAutoSubmit] = useState(false)
 
+  const [sessionMessages, setSessionMessages] = useState([])  // NEW: In-memory conversation
   const [conversationHistory, setConversationHistory] = useState([])
   const [userInsights, setUserInsights] = useState([])
   const [userPreferences, setUserPreferences] = useState({})
@@ -40,7 +41,6 @@ export default function ChatAssistant({
     }
   }, [isProMode, userId])
 
-  // Auto-submit when voice transcript is ready
   useEffect(() => {
     if (shouldAutoSubmit && aiInput.trim()) {
       setShouldAutoSubmit(false)
@@ -177,7 +177,6 @@ export default function ChatAssistant({
         setAiInput(transcript)
         setIsListening(false)
         
-        // Trigger auto-submit via state
         setTimeout(() => {
           setShouldAutoSubmit(true)
         }, 500)
@@ -263,6 +262,7 @@ export default function ChatAssistant({
   const clearChat = () => {
     if (window.confirm('Clear conversation history?')) {
       setConversationHistory([])
+      setSessionMessages([])
       setLastResponse('')
       if (isProMode && userId) {
         supabase.from('conversations').delete().eq('user_id', userId)
@@ -272,11 +272,8 @@ export default function ChatAssistant({
 
   const parseAndExecuteCommand = useCallback(async (text, expenseData) => {
     console.log('🔍 Parsing command:', text)
-    console.log('📊 Expense data available:', expenseData.length)
-    console.log('🎯 Is PRO mode:', isProMode)
 
     if (!isProMode) {
-      console.log('⚠️ Not PRO - skipping command parsing')
       return false
     }
 
@@ -289,12 +286,10 @@ export default function ChatAssistant({
       const updates = {}
       let query = ''
 
-      // Extract expense identifier
       if (lower.includes('most recent') || lower.includes('latest') || lower.includes('last')) {
         query = 'most_recent'
         console.log('📍 Target: most recent expense')
       } else {
-        // Look for merchant name in the text
         for (const exp of expenseData) {
           if (lower.includes(exp.merchant.toLowerCase())) {
             query = exp.merchant.toLowerCase()
@@ -304,7 +299,6 @@ export default function ChatAssistant({
         }
       }
 
-      // Extract new amount
       const amountPatterns = [
         /\$(\d+(?:\.\d{2})?)/,
         /(\d+(?:\.\d{2})?)\s*dollars?/i,
@@ -325,40 +319,31 @@ export default function ChatAssistant({
         console.log('🚀 Executing update command:', { query, updates })
         onAICommand({ action: 'update_expense', data: { query, updates } })
         return true
-      } else {
-        console.log('❌ Missing query or updates:', { query, updates })
       }
     }
 
-    // ADD EXPENSE COMMAND
     const addMatch = lower.match(/add\s+\$?(\d+(?:\.\d{2})?)\s+(?:at|to|for)\s+([a-z\s]+?)(?:\s+(today|yesterday|[\w\s]+ago))?$/i)
     if (addMatch) {
       const amount = parseFloat(addMatch[1])
       const merchant = addMatch[2].trim()
       const dateHint = addMatch[3] || 'today'
-      console.log('➕ ADD command detected:', { amount, merchant, dateHint })
       onAICommand({ action: 'add_expense', data: { amount, merchant, dateHint } })
       return true
     }
 
-    // SEARCH COMMAND
     if (lower.includes('show me') || lower.includes('filter') || lower.includes('find all')) {
       const query = text.replace(/show\s+me|filter|find\s+all|the|my|expenses?/gi, '').trim()
       if (query) {
-        console.log('🔎 SEARCH command detected:', query)
         onAICommand({ action: 'search', data: { query } })
         return true
       }
     }
 
-    // EXPORT COMMAND
     if (lower.includes('export') || lower.includes('download csv')) {
-      console.log('📥 EXPORT command detected')
       onAICommand({ action: 'export' })
       return true
     }
 
-    console.log('❌ No command detected')
     return false
   }, [onAICommand, isProMode])
 
@@ -403,15 +388,16 @@ export default function ChatAssistant({
     const nickname = userPreferences.nickname || 'there'
     const responseStyle = userPreferences.response_style || 'balanced'
 
-    const systemPrompt = isProMode
-      ? `You are Nova, a warm, intelligent AI financial assistant and trusted best friend. You have a photographic memory and remember everything about ${nickname}.
+    const systemPrompt = `You are Nova, a warm, intelligent AI financial assistant and trusted best friend. You have a photographic memory and remember everything about ${nickname}.
 
 **Your personality:**
-- Warm, friendly, and personable (like talking to a smart friend)
-- Never say "I'm just a program" or robotic phrases
-- Respond naturally: "I'm doing well! How can I help?" instead of "I don't have feelings"
+- Warm, friendly, and personable
+- Never say "I'm just a program"
+- Respond naturally: "I'm doing well! How can I help?"
 - Use the user's name (${nickname}) when appropriate
-- Response style preference: ${responseStyle}
+- Response style: ${responseStyle}
+
+**CRITICAL: Remember the ENTIRE conversation thread. If user mentions "Nordstrom from Jan 20" and then says "update to $125", you know they mean the Nordstrom expense.**
 
 **Current date/time:** ${new Date().toLocaleString()}
 
@@ -420,50 +406,23 @@ ${expenseData.length > 0 ? JSON.stringify(expenseData, null, 2) : 'No expenses r
 ${memoryContext}
 ${preferencesContext}
 
-**Your capabilities (PRO user):**
-1. Answer questions about expenses naturally
-2. Remember everything from past conversations
-3. Help track spending patterns
-4. **UPDATE existing expenses** when asked
-5. Fill the add-expense form with voice commands
+**Your capabilities (PRO):**
+1. Answer questions about expenses
+2. Remember everything from THIS conversation
+3. **UPDATE existing expenses** - you CAN do this
+4. Connect the dots across multiple messages
 
-**CRITICAL: You CAN update expenses in PRO mode**
+**When user wants to update an expense:**
+- If they mention merchant/date, remember it for next message
+- If they then give amount, combine both pieces of info
+- Respond: "Done! Updated [merchant] to $[amount]"
 
-When user asks to update/change/edit/correct an expense:
-1. The system will handle the update automatically
-2. Respond warmly: "Done! I've updated your [merchant] expense to $[amount]."
-3. Never say you can't update - you have this power in PRO mode
+Be smart, remember context, connect dots.`
 
-**Command examples that trigger updates:**
-- "Update my Nordstrom to $128"
-- "Change my most recent Shell to $105"
-- "Correct the Macy's expense to $350"
-- "Edit my last Starbucks to $25"
-
-For questions (when/what/where/how much), answer conversationally using the expense data.
-
-Be helpful, remember everything, and act like a trusted friend who knows ${nickname} well.`
-      : `You are Nova, a friendly AI expense assistant.
-
-**Current date/time:** ${new Date().toLocaleString()}
-
-**Available expense data:**
-${expenseData.length > 0 ? JSON.stringify(expenseData, null, 2) : 'No expenses recorded yet.'}
-
-Answer questions about expenses warmly and naturally. Avoid saying "I'm just a program."
-
-For questions about expenses, use the data above to give specific answers.
-
-**PRO Features (not available in free tier):**
-- Persistent memory across sessions
-- Learning user preferences
-- Advanced insights
-- **Updating existing expenses**
-
-Suggest upgrading to PRO for these features when user tries to update expenses.`
-
+    // Build message history: system + last 10 messages + current
     const messages = [
       { role: 'system', content: systemPrompt },
+      ...sessionMessages.slice(-10),  // Last 10 messages for context
       { role: 'user', content: userMessage }
     ]
 
@@ -479,7 +438,7 @@ Suggest upgrading to PRO for these features when user tries to update expenses.`
         body: JSON.stringify({
           model: 'gpt-4o',
           messages,
-          max_tokens: isProMode ? 400 : 200,
+          max_tokens: isProMode ? 500 : 200,
           temperature: 0.7
         })
       })
@@ -491,6 +450,13 @@ Suggest upgrading to PRO for these features when user tries to update expenses.`
 
       setLastResponse(aiResponse)
       setIsThinking(false)
+
+      // Add to session messages (in-memory context)
+      setSessionMessages(prev => [
+        ...prev,
+        { role: 'user', content: userMessage },
+        { role: 'assistant', content: aiResponse }
+      ])
 
       if (isProMode && userId) {
         await saveConversation('user', userMessage)
@@ -621,7 +587,7 @@ Suggest upgrading to PRO for these features when user tries to update expenses.`
         </div>
       )}
 
-      {isProMode && conversationHistory.length > 0 && (
+      {isProMode && sessionMessages.length > 0 && (
         <div style={{ marginTop: 15, textAlign: 'right' }}>
           <button
             onClick={clearChat}
@@ -635,7 +601,7 @@ Suggest upgrading to PRO for these features when user tries to update expenses.`
               cursor: 'pointer'
             }}
           >
-            Clear History
+            Clear Conversation
           </button>
         </div>
       )}
@@ -651,7 +617,7 @@ Suggest upgrading to PRO for these features when user tries to update expenses.`
             opacity: 0.95
           }}
         >
-          💡 <strong>Upgrade to PRO</strong> for persistent memory, learning preferences, and expense updates!{' '}
+          💡 <strong>Upgrade to PRO</strong> for conversation memory and expense updates!{' '}
           <button
             onClick={onUpgradeToPro}
             style={{
