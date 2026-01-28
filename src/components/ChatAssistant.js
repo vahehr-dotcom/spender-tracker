@@ -25,8 +25,8 @@ export default function ChatAssistant({
   const agentRef = useRef(null)
   const expensesRef = useRef(expenses)
   const categoriesRef = useRef(categories)
+  const profileLoadedRef = useRef(false)
 
-  // Keep expense/category refs updated
   useEffect(() => {
     expensesRef.current = expenses
   }, [expenses])
@@ -37,21 +37,16 @@ export default function ChatAssistant({
 
   // Initialize Memory and Agent
   useEffect(() => {
-    if (userId && !memoryRef.current) {
+    if (!userId) {
+      console.warn('⏳ Waiting for userId...')
+      return
+    }
+
+    if (!memoryRef.current) {
+      console.log('🚀 Initializing Nova for user:', userId)
       const memory = new MemoryManager(userId)
       memoryRef.current = memory
 
-      // Load user profile
-      if (isProMode) {
-        memory.loadProfile().then(() => {
-          console.log('✅ Nova initialized with memory')
-          setIsInitialized(true)
-        })
-      } else {
-        setIsInitialized(true)
-      }
-
-      // Initialize agent with tools
       const tools = {
         update_expense: (data) => onAICommand({ action: 'update_expense', data }),
         add_expense: (data) => onAICommand({ action: 'add_expense', data }),
@@ -61,8 +56,30 @@ export default function ChatAssistant({
 
       const agent = new NovaAgent(memory, tools, isProMode)
       agentRef.current = agent
+
+      setIsInitialized(true)
+      console.log('✅ Nova initialized')
     }
-  }, [userId, isProMode, onAICommand])
+  }, [userId, onAICommand, isProMode])
+
+  // Load profile when PRO mode activates
+  useEffect(() => {
+    if (isProMode && memoryRef.current && !profileLoadedRef.current) {
+      profileLoadedRef.current = true
+      
+      const loadProfile = async () => {
+        console.log('📥 Loading profile for PRO user...')
+        await memoryRef.current.loadProfile()
+        
+        // Update agent with PRO mode
+        if (agentRef.current) {
+          agentRef.current.isProMode = true
+        }
+      }
+      
+      loadProfile()
+    }
+  }, [isProMode])
 
   // Voice auto-submit trigger
   useEffect(() => {
@@ -82,6 +99,7 @@ export default function ChatAssistant({
 
       recognition.onresult = (event) => {
         const transcript = event.results[0][0].transcript
+        console.log('🎤 Voice transcript:', transcript)
         setVoiceTranscript(transcript)
         setAiInput(transcript)
         setIsListening(false)
@@ -92,7 +110,7 @@ export default function ChatAssistant({
       }
 
       recognition.onerror = (event) => {
-        console.error('Speech recognition error:', event.error)
+        console.error('🎤 Voice error:', event.error)
         setIsListening(false)
       }
 
@@ -101,6 +119,12 @@ export default function ChatAssistant({
       }
 
       recognitionRef.current = recognition
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
+      }
     }
   }, [])
 
@@ -163,7 +187,7 @@ export default function ChatAssistant({
 
       await audio.play()
     } catch (err) {
-      console.error('TTS error:', err)
+      console.error('🔊 TTS error:', err)
       setIsSpeaking(false)
     }
   }
@@ -179,13 +203,18 @@ export default function ChatAssistant({
 
   const handleAISubmit = async (e) => {
     e?.preventDefault()
-    if (!aiInput.trim() || isThinking || !isInitialized) return
+    
+    if (!isInitialized) {
+      console.warn('⏳ Nova not ready yet')
+      return
+    }
+
+    if (!aiInput.trim() || isThinking) return
 
     const userMessage = aiInput.trim()
     setAiInput('')
     setVoiceTranscript('')
     setIsThinking(true)
-    setLastResponse('')
 
     const memory = memoryRef.current
     const agent = agentRef.current
@@ -196,41 +225,45 @@ export default function ChatAssistant({
       return
     }
 
-    // Add user message to memory
+    console.log('💬 User message:', userMessage)
+
+    // Add user message to session memory
     memory.addMessage('user', userMessage)
 
     // Build expense data
-    const currentExpenses = expensesRef.current || []
-    const currentCategories = categoriesRef.current || []
+    const expenseData = {
+      expenses: expensesRef.current || [],
+      categories: categoriesRef.current || []
+    }
 
-    const expenseData = currentExpenses.map((exp) => {
-      const cat = currentCategories.find((c) => c.id === exp.category_id)
-      return {
-        id: exp.id,
-        amount: exp.amount,
-        merchant: exp.merchant,
-        category: cat ? cat.name : 'Other',
-        payment_method: exp.payment_method,
-        spent_date: new Date(exp.spent_at).toLocaleDateString(),
-        spent_time: new Date(exp.spent_at).toLocaleTimeString(),
-        is_tax_deductible: exp.is_tax_deductible || false,
-        is_reimbursable: exp.is_reimbursable || false,
-        notes: exp.notes || '',
-        tags: exp.tags || []
-      }
+    console.log('📊 Expense data:', {
+      expenses: expenseData.expenses.length,
+      categories: expenseData.categories.length
     })
 
     try {
-      // 1. Let agent detect and execute commands
-      await agent.detectAndExecute(userMessage, expenseData)
+      // Check for commands (PRO mode)
+      if (isProMode) {
+        const command = await agent.detectAndExecute(userMessage, expenseData)
+        
+        if (command) {
+          console.log('🚀 Executing command:', command)
+          
+          if (onAICommand) {
+            await onAICommand(command)
+          }
+        }
+      }
 
-      // 2. Build system prompt with personality + memory
+      // Build system prompt
       const systemPrompt = agent.buildSystemPrompt(expenseData)
 
-      // 3. Build messages with conversation history
+      // Build messages with conversation history
       const messages = agent.buildMessages(systemPrompt, userMessage)
 
-      // 4. Call OpenAI
+      console.log('💬 Sending to OpenAI with context:', messages.length, 'messages')
+
+      // Call OpenAI
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -250,24 +283,30 @@ export default function ChatAssistant({
       const json = await res.json()
       const aiResponse = json.choices?.[0]?.message?.content || 'Sorry, I had trouble with that.'
 
-      // 5. Add AI response to memory
-      memory.addMessage('assistant', aiResponse)
+      console.log('🤖 Nova response:', aiResponse)
 
-      // 6. Learn from conversation (PRO only)
+      // Add AI response to session memory
+      memory.addMessage('assistant', aiResponse)
+      setLastResponse(aiResponse)
+
+      // CRITICAL: Save to database (PRO only)
       if (isProMode) {
-        memory.saveConversation('user', userMessage)
-        memory.saveConversation('assistant', aiResponse)
-        memory.learnFromConversation(userMessage, aiResponse)
+        console.log('💾 Saving conversation to database...')
+        
+        await memory.saveConversation('user', userMessage)
+        await memory.saveConversation('assistant', aiResponse)
+        
+        console.log('🧠 Learning from conversation...')
+        await memory.learnFromConversation(userMessage, aiResponse)
+        
+        console.log('✅ Memory saved!')
       }
 
-      setLastResponse(aiResponse)
       setIsThinking(false)
-
-      // 7. Speak response
       speak(aiResponse)
 
     } catch (err) {
-      console.error('Nova error:', err)
+      console.error('💥 Nova error:', err)
       setLastResponse('Sorry, something went wrong. Please try again.')
       setIsThinking(false)
     }

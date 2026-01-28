@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient'
  * MemoryManager - Unified memory system for Nova
  * Handles short-term (session), long-term (database), and learning
  */
-class MemoryManager {
+export class MemoryManager {
   constructor(userId) {
     this.userId = userId
     this.sessionMessages = [] // Short-term: current conversation
@@ -17,29 +17,48 @@ class MemoryManager {
    * Load user's complete profile from database
    */
   async loadProfile() {
-    if (!this.userId) return
+    if (!this.userId) {
+      console.warn('⚠️ No userId - skipping memory load')
+      return null
+    }
 
     try {
+      console.log('🔍 Loading memory for user:', this.userId)
+
       // Load last 50 conversations for context
-      const { data: conversations } = await supabase
+      const { data: conversations, error: convError } = await supabase
         .from('conversations')
         .select('*')
         .eq('user_id', this.userId)
         .order('created_at', { ascending: false })
         .limit(50)
 
+      if (convError) {
+        console.error('❌ Conversations load error:', convError)
+      }
+
       // Load insights (learned patterns)
-      const { data: insights } = await supabase
+      const { data: insights, error: insightsError } = await supabase
         .from('user_insights')
         .select('*')
         .eq('user_id', this.userId)
         .eq('is_active', true)
 
+      if (insightsError) {
+        console.error('❌ Insights load error:', insightsError)
+      }
+
       // Load preferences
-      const { data: prefs } = await supabase
+      const { data: prefs, error: prefsError } = await supabase
         .from('user_preferences')
         .select('*')
         .eq('user_id', this.userId)
+
+      if (prefsError) {
+        console.error('❌ Preferences load error:', prefsError)
+      }
+
+      console.log('📦 Raw preferences from DB:', prefs)
 
       this.userProfile = {
         conversations: conversations || [],
@@ -53,12 +72,13 @@ class MemoryManager {
       console.log('🧠 Memory loaded:', {
         conversations: conversations?.length || 0,
         insights: insights?.length || 0,
-        preferences: Object.keys(this.preferences).length
+        preferences: Object.keys(this.preferences).length,
+        preferenceDetails: this.preferences
       })
 
       return this.userProfile
     } catch (err) {
-      console.error('Memory load error:', err)
+      console.error('💥 Memory load error:', err)
       return null
     }
   }
@@ -78,7 +98,7 @@ class MemoryManager {
    * Add message to session memory
    */
   addMessage(role, content) {
-    this.sessionMessages.push({ role, content })
+    this.sessionMessages.push({ role, content, timestamp: new Date() })
     
     // Keep only last 20 messages to avoid token limits
     if (this.sessionMessages.length > 20) {
@@ -90,7 +110,8 @@ class MemoryManager {
    * Get conversation history for AI prompt
    */
   getConversationHistory() {
-    return this.sessionMessages
+    // Return last 10 session messages for context
+    return this.sessionMessages.slice(-10)
   }
 
   /**
@@ -103,10 +124,12 @@ class MemoryManager {
       await supabase.from('conversations').insert({
         user_id: this.userId,
         role,
-        message
+        message,
+        created_at: new Date().toISOString()
       })
+      console.log('💾 Conversation saved')
     } catch (err) {
-      console.error('Save conversation error:', err)
+      console.error('❌ Save conversation error:', err)
     }
   }
 
@@ -116,14 +139,18 @@ class MemoryManager {
   async learnFromConversation(userMessage, aiResponse) {
     if (!this.userId) return
 
-    const insights = this.extractInsights(userMessage, aiResponse)
+    try {
+      const insights = this.extractInsights(userMessage, aiResponse)
 
-    for (const insight of insights) {
-      if (insight.type === 'preference') {
-        await this.savePreference(insight.key, insight.value)
-      } else if (insight.type === 'insight') {
-        await this.saveInsight(insight.category, insight.data)
+      for (const insight of insights) {
+        if (insight.type === 'preference') {
+          await this.savePreference(insight.key, insight.value)
+        } else if (insight.type === 'insight') {
+          await this.saveInsight(insight.category, insight.data)
+        }
       }
+    } catch (err) {
+      console.error('❌ Learning error:', err)
     }
   }
 
@@ -134,14 +161,22 @@ class MemoryManager {
     const insights = []
     const lower = userMessage.toLowerCase()
 
-    // Learn name
+    // Learn name - FIXED: save as 'name' not 'nickname'
     if (lower.includes('my name is') || lower.includes("i'm ") || lower.includes("i am ")) {
       const nameMatch = userMessage.match(/(?:my name is|i'm|i am)\s+(\w+)/i)
       if (nameMatch) {
+        const name = nameMatch[1]
+        console.log('🎯 Extracted name:', name)
+        insights.push({
+          type: 'preference',
+          key: 'name',
+          value: name
+        })
+        // ALSO save as nickname for backwards compatibility
         insights.push({
           type: 'preference',
           key: 'nickname',
-          value: nameMatch[1]
+          value: name
         })
       }
     }
@@ -194,18 +229,24 @@ class MemoryManager {
     if (!this.userId) return
 
     try {
-      await supabase.from('user_preferences').upsert({
+      const { error } = await supabase.from('user_preferences').upsert({
         user_id: this.userId,
         preference_type: key,
-        preference_value: value
+        preference_value: value,
+        set_at: new Date().toISOString()
       }, {
         onConflict: 'user_id,preference_type'
       })
 
+      if (error) {
+        console.error('❌ Upsert error:', error)
+        return
+      }
+
       this.preferences[key] = value
-      console.log('💾 Preference saved:', key, '=', value)
+      console.log('✅ Preference saved:', key, '=', value)
     } catch (err) {
-      console.error('Save preference error:', err)
+      console.error('💥 Save preference error:', err)
     }
   }
 
@@ -218,15 +259,16 @@ class MemoryManager {
     try {
       await supabase.from('user_insights').insert({
         user_id: this.userId,
-        insight_type: category,
-        insight_data: data,
+        insight_category: category,
+        insight_text: JSON.stringify(data),
+        learned_at: new Date().toISOString(),
         is_active: true
       })
 
-      this.insights.push({ insight_type: category, insight_data: data })
-      console.log('💡 Insight saved:', category, data)
+      this.insights.push({ insight_category: category, insight_text: JSON.stringify(data) })
+      console.log('💡 Insight saved:', category)
     } catch (err) {
-      console.error('Save insight error:', err)
+      console.error('❌ Save insight error:', err)
     }
   }
 
@@ -236,9 +278,10 @@ class MemoryManager {
   buildMemoryContext() {
     const parts = []
 
-    // Add nickname if known
-    if (this.preferences.nickname) {
-      parts.push(`User's name: ${this.preferences.nickname}`)
+    // Add name if known (check both 'name' and 'nickname')
+    const userName = this.preferences.name || this.preferences.nickname
+    if (userName) {
+      parts.push(`User's name: ${userName}`)
     }
 
     // Add location if known
@@ -251,12 +294,10 @@ class MemoryManager {
       parts.push(`Prefers ${this.preferences.response_style} responses`)
     }
 
-    // Add insights
+    // Add recent insights
     if (this.insights.length > 0) {
-      const insightTexts = this.insights
-        .slice(-10) // Last 10 insights
-        .map(i => `${i.insight_type}: ${JSON.stringify(i.insight_data)}`)
-      parts.push(`\nLearned patterns:\n${insightTexts.join('\n')}`)
+      const recentInsights = this.insights.slice(-5).map(i => i.insight_text || i.insight_data)
+      parts.push(`Recent insights: ${recentInsights.join('; ')}`)
     }
 
     return parts.length > 0 ? `\n\n**What you know about this user:**\n${parts.join('\n')}` : ''
@@ -266,14 +307,14 @@ class MemoryManager {
    * Get user's preferred name
    */
   getNickname() {
-    return this.preferences.nickname || 'there'
+    return this.preferences.name || this.preferences.nickname || 'friend'
   }
 
   /**
    * Get response style
    */
   getResponseStyle() {
-    return this.preferences.response_style || 'balanced'
+    return this.preferences.response_style || 'friendly'
   }
 
   /**

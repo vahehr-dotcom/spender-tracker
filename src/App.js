@@ -6,6 +6,8 @@ import ChatAssistant from './components/ChatAssistant'
 import AddExpenseForm from './components/AddExpenseForm'
 import ExpenseList from './components/ExpenseList'
 import MonthlySummary from './components/MonthlySummary'
+import FileImport from './components/FileImport'
+import ImportPreview from './components/ImportPreview'
 
 function App() {
   const [session, setSession] = useState(null)
@@ -52,6 +54,9 @@ function App() {
 
   const merchantMemoryRef = useRef({})
   const [categoryLearnedSource, setCategoryLearnedSource] = useState(null)
+
+  const [showImport, setShowImport] = useState(false)
+  const [importedTransactions, setImportedTransactions] = useState([])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -551,6 +556,42 @@ function App() {
     [allExpenses, loadExpenses]
   )
 
+  const handleTransactionsParsed = (transactions, fileName) => {
+    console.log('📦 Received parsed transactions:', transactions.length, 'from', fileName)
+    setImportedTransactions(transactions)
+  }
+
+  const handleImport = async (selectedTransactions) => {
+    const expensesToInsert = selectedTransactions.map(txn => ({
+      user_id: session.user.id,
+      amount: txn.amount,
+      merchant: txn.merchant,
+      category_id: txn.category || null,
+      spent_at: txn.date,
+      notes: txn.notes || null,
+      payment_method: 'card',
+      is_tax_deductible: false,
+      archived: false
+    }))
+
+    const { error } = await supabase.from('expenses').insert(expensesToInsert)
+    
+    if (error) {
+      alert('Import failed: ' + error.message)
+      return
+    }
+
+    alert(`✅ Successfully imported ${selectedTransactions.length} expenses!`)
+    setImportedTransactions([])
+    setShowImport(false)
+    await loadExpenses()
+  }
+
+  const handleCancelImport = () => {
+    setImportedTransactions([])
+    setShowImport(false)
+  }
+
   const filteredExpenses = useMemo(() => {
     return expenses
   }, [expenses])
@@ -622,6 +663,20 @@ function App() {
       >
         <h1 style={{ margin: 0 }}>💰 Spender Tracker</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+          <button
+            onClick={() => setShowImport(!showImport)}
+            style={{
+              padding: '8px 16px',
+              background: '#10b981',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            📥 Import
+          </button>
           {isProMode ? (
             <span
               style={{
@@ -751,6 +806,19 @@ function App() {
         onAICommand={handleAICommand}
         userId={session?.user?.id}
       />
+
+      {showImport && importedTransactions.length === 0 && (
+        <FileImport onTransactionsParsed={handleTransactionsParsed} />
+      )}
+
+      {importedTransactions.length > 0 && (
+        <ImportPreview
+          transactions={importedTransactions}
+          categories={categories}
+          onImport={handleImport}
+          onCancel={handleCancelImport}
+        />
+      )}
 
       <AddExpenseForm
         amount={amount}
