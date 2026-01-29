@@ -550,15 +550,52 @@ function App() {
   const handleAICommand = useCallback(
     async (cmd) => {
       if (cmd.action === 'add_expense') {
-        const { merchant: m, amount: a, dateHint } = cmd.data
-        if (m) setMerchant(m)
-        if (a) setAmount(String(a))
+        // 🔥 FIX: Actually insert into database, don't just pre-fill form
+        const { merchant: m, amount: a, dateHint, category, notes: aiNotes } = cmd.data
+        
+        if (!m || !a) {
+          alert('Missing merchant or amount for add command')
+          return
+        }
+
+        let spentAt = new Date()
         if (dateHint) {
           const parsed = parseNaturalDate(dateHint)
-          if (parsed) {
-            setSpentAtLocal(parsed.toISOString().slice(0, 16))
-          }
+          if (parsed) spentAt = parsed
         }
+
+        // Auto-suggest category
+        let categoryIdToUse = category || null
+        if (m && !categoryIdToUse) {
+          const suggested = suggestCategoryForMerchant(m)
+          if (suggested) categoryIdToUse = suggested
+        }
+
+        const expenseData = {
+          user_id: session.user.id,
+          amount: parseFloat(a),
+          merchant: m.trim(),
+          category_id: categoryIdToUse,
+          payment_method: 'card',
+          spent_at: spentAt.toISOString(),
+          is_tax_deductible: false,
+          notes: aiNotes || null,
+          archived: false
+        }
+
+        console.log('💾 Adding expense via AI:', expenseData)
+
+        const { error } = await supabase.from('expenses').insert(expenseData)
+        
+        if (error) {
+          console.error('❌ Add failed:', error)
+          alert('Failed to add expense: ' + error.message)
+          return
+        }
+
+        console.log('✅ Expense added successfully')
+        await loadExpenses()
+        
       } else if (cmd.action === 'update_expense') {
         const { query, updates } = cmd.data
 
@@ -629,7 +666,7 @@ function App() {
         exportCsv()
       }
     },
-    [loadExpenses]
+    [session, loadExpenses, suggestCategoryForMerchant]
   )
 
   const handleTransactionsParsed = (transactions, fileName) => {
