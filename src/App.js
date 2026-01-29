@@ -8,6 +8,9 @@ import ExpenseList from './components/ExpenseList'
 import MonthlySummary from './components/MonthlySummary'
 import FileImport from './components/FileImport'
 import ImportPreview from './components/ImportPreview'
+import ProactiveEngine from './lib/ProactiveEngine'
+import PatternAnalyzer from './lib/PatternAnalyzer'
+import PredictiveEngine from './lib/PredictiveEngine'
 
 function App() {
   const [session, setSession] = useState(null)
@@ -58,6 +61,15 @@ function App() {
   const [showImport, setShowImport] = useState(false)
   const [importedTransactions, setImportedTransactions] = useState([])
 
+  const [notifications, setNotifications] = useState([])
+
+  // 🔥 FIX: Store allExpenses in ref so handleAICommand always has latest
+  const allExpensesRef = useRef([])
+  
+  useEffect(() => {
+    allExpensesRef.current = allExpenses
+  }, [allExpenses])
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
@@ -77,6 +89,35 @@ function App() {
       loadExpenses()
     }
   }, [session])
+
+  useEffect(() => {
+    if (isProMode && session && allExpenses.length > 0 && categories.length > 0) {
+      const engine = new ProactiveEngine(session.user.id, allExpenses, categories)
+      
+      engine.generateNotifications().then(() => {
+        ProactiveEngine.fetchNotifications(session.user.id).then((notifs) => {
+          setNotifications(notifs)
+        })
+      })
+    }
+  }, [isProMode, session, allExpenses, categories])
+
+  useEffect(() => {
+    if (!isProMode || !session) return
+
+    const interval = setInterval(() => {
+      ProactiveEngine.fetchNotifications(session.user.id).then((notifs) => {
+        setNotifications(notifs)
+      })
+    }, 5 * 60 * 1000)
+
+    return () => clearInterval(interval)
+  }, [isProMode, session])
+
+  const dismissNotification = useCallback(async (notificationId) => {
+    await ProactiveEngine.dismissNotification(notificationId)
+    setNotifications(prev => prev.filter(n => n.id !== notificationId))
+  }, [])
 
   const loadSubscription = async () => {
     if (!session) return
@@ -521,30 +562,65 @@ function App() {
       } else if (cmd.action === 'update_expense') {
         const { query, updates } = cmd.data
 
+        // 🔥 FIX: Use ref instead of state
+        const currentExpenses = allExpensesRef.current
+
+        console.log('🔍 Searching for expense:', query)
+        console.log('📊 Available expenses:', currentExpenses.length)
+
         let targetExpense = null
 
         if (query === 'most_recent') {
-          targetExpense = allExpenses[0]
+          targetExpense = currentExpenses[0]
+          console.log('✅ Found most recent:', targetExpense)
         } else {
           const lowerQuery = query.toLowerCase()
-          targetExpense = allExpenses.find(exp =>
-            exp.merchant.toLowerCase().includes(lowerQuery)
+          
+          targetExpense = currentExpenses.find(exp =>
+            exp.merchant.toLowerCase() === lowerQuery
           )
+
+          if (!targetExpense) {
+            targetExpense = currentExpenses.find(exp =>
+              exp.merchant.toLowerCase().includes(lowerQuery)
+            )
+          }
 
           if (!targetExpense) {
             const queryAmount = parseFloat(query)
             if (!isNaN(queryAmount)) {
-              targetExpense = allExpenses.find(exp =>
+              targetExpense = currentExpenses.find(exp =>
                 Math.abs(parseFloat(exp.amount) - queryAmount) < 0.01
               )
             }
           }
+
+          if (!targetExpense) {
+            const dateMatch = query.match(/(\d{1,2})\/(\d{1,2})/)
+            if (dateMatch) {
+              const month = parseInt(dateMatch[1])
+              const day = parseInt(dateMatch[2])
+              
+              targetExpense = currentExpenses.find(exp => {
+                const expDate = new Date(exp.spent_at)
+                return expDate.getMonth() + 1 === month && expDate.getDate() === day
+              })
+            }
+          }
+
+          if (targetExpense) {
+            console.log('✅ Found expense:', targetExpense.merchant, targetExpense.amount)
+          } else {
+            console.log('❌ No match found for query:', query)
+            console.log('📋 First 5 merchants:', currentExpenses.slice(0, 5).map(e => e.merchant))
+          }
         }
 
         if (targetExpense) {
+          console.log('🚀 Updating expense:', targetExpense.id, updates)
           await updateExpense(targetExpense.id, updates)
         } else {
-          alert('Could not find that expense to update.')
+          alert(`Could not find that expense. Searched for: "${query}"`)
         }
       } else if (cmd.action === 'search') {
         setSearch(cmd.data.query || '')
@@ -553,7 +629,7 @@ function App() {
         exportCsv()
       }
     },
-    [allExpenses, loadExpenses]
+    [loadExpenses]
   )
 
   const handleTransactionsParsed = (transactions, fileName) => {
@@ -805,6 +881,8 @@ function App() {
         onUpgradeToPro={upgradeToPro}
         onAICommand={handleAICommand}
         userId={session?.user?.id}
+        notifications={notifications}
+        onDismissNotification={dismissNotification}
       />
 
       {showImport && importedTransactions.length === 0 && (

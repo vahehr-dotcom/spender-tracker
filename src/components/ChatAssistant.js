@@ -8,7 +8,9 @@ export default function ChatAssistant({
   isProMode,
   onUpgradeToPro,
   onAICommand,
-  userId
+  userId,
+  notifications = [],
+  onDismissNotification
 }) {
   const [aiInput, setAiInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
@@ -255,7 +257,7 @@ export default function ChatAssistant({
         }
       }
 
-      // Build system prompt
+      // Build system prompt (now includes emotional intelligence)
       const systemPrompt = agent.buildSystemPrompt(expenseData)
 
       // Build messages with conversation history
@@ -314,6 +316,51 @@ export default function ChatAssistant({
 
   const nickname = memoryRef.current?.getNickname() || 'there'
 
+  // Get notification icon
+  const getNotificationIcon = (type) => {
+    switch (type) {
+      case 'greeting':
+        return '👋'
+      case 'inactivity':
+        return '⏰'
+      case 'budget_alert':
+        return '⚠️'
+      case 'budget_win':
+        return '🎉'
+      case 'pattern_detected':
+        return '🔍'
+      case 'subscription_detected':
+        return '💳'
+      case 'subscription_renewal':
+        return '⏰'
+      case 'budget_forecast':
+        return '📊'
+      case 'budget_forecast_alert':
+        return '⚠️'
+      case 'unused_subscription':
+        return '💡'
+      default:
+        return '💡'
+    }
+  }
+
+  // Format notification time
+  const formatNotificationTime = (timestamp) => {
+    const date = new Date(timestamp)
+    const now = new Date()
+    const diffMs = now - date
+    const diffMins = Math.floor(diffMs / 60000)
+    
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    
+    const diffHours = Math.floor(diffMins / 60)
+    if (diffHours < 24) return `${diffHours}h ago`
+    
+    const diffDays = Math.floor(diffHours / 24)
+    return `${diffDays}d ago`
+  }
+
   return (
     <div
       style={{
@@ -327,7 +374,7 @@ export default function ChatAssistant({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
         <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
           🤖 Nova - Your AI Best Friend
-          {isProMode && <span style={{ fontSize: 12, opacity: 0.9 }}>✨ Learning Mode</span>}
+          {isProMode && <span style={{ fontSize: 12, opacity: 0.9 }}>✨ Learning Mode • 💜 Emotionally Intelligent</span>}
         </h3>
         
         {memoryRef.current && memoryRef.current.sessionMessages.length > 0 && (
@@ -347,6 +394,58 @@ export default function ChatAssistant({
           </button>
         )}
       </div>
+
+      {/* Proactive Notifications Section */}
+      {isProMode && notifications.length > 0 && (
+        <div style={{ marginBottom: 15, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {notifications.map((notif) => (
+            <div
+              key={notif.id}
+              style={{
+                background: 'rgba(255,255,255,0.2)',
+                backdropFilter: 'blur(10px)',
+                padding: 12,
+                borderRadius: 8,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                border: '1px solid rgba(255,255,255,0.3)',
+                animation: 'slideIn 0.3s ease-out'
+              }}
+            >
+              <div style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <span style={{ fontSize: 24, lineHeight: 1 }}>
+                  {getNotificationIcon(notif.notification_type)}
+                </span>
+                <div style={{ flex: 1 }}>
+                  <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5 }}>
+                    {notif.message}
+                  </p>
+                  <p style={{ margin: '4px 0 0 0', fontSize: 11, opacity: 0.7 }}>
+                    {formatNotificationTime(notif.created_at)}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => onDismissNotification(notif.id)}
+                style={{
+                  background: 'rgba(255,255,255,0.2)',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  color: 'white',
+                  padding: '4px 8px',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  marginLeft: 10,
+                  flexShrink: 0
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {!isInitialized && (
         <div style={{ textAlign: 'center', opacity: 0.8, padding: 20 }}>
@@ -462,7 +561,7 @@ export default function ChatAssistant({
                 opacity: 0.95
               }}
             >
-              💡 <strong>Upgrade to PRO</strong> to unlock Nova's full intelligence - she'll remember you forever, learn your habits, and become your true AI best friend!{' '}
+              💡 <strong>Upgrade to PRO</strong> to unlock Nova's full intelligence - emotional understanding, perfect memory, and true AI companionship!{' '}
               <button
                 onClick={onUpgradeToPro}
                 style={{

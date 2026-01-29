@@ -1,6 +1,6 @@
 /**
- * NovaAgent - The reasoning brain
- * Thinks, plans, and acts with tools
+ * NovaAgent - The reasoning brain with emotional intelligence
+ * Thinks, plans, and acts with tools while understanding emotions
  */
 class NovaAgent {
   constructor(memoryManager, tools, isProMode) {
@@ -10,12 +10,16 @@ class NovaAgent {
   }
 
   /**
-   * Build system prompt with personality and memory
+   * Build system prompt with personality, memory, and emotional intelligence
    */
   buildSystemPrompt(expenseData) {
     const nickname = this.memory.getNickname()
     const responseStyle = this.memory.getResponseStyle()
     const memoryContext = this.memory.buildMemoryContext()
+
+    // Extract expenses array properly
+    const expenses = expenseData?.expenses || []
+    const categories = expenseData?.categories || []
 
     const personality = `You are Nova, a warm, intelligent AI financial assistant and trusted best friend.
 
@@ -25,6 +29,7 @@ class NovaAgent {
 - You celebrate their wins and empathize with struggles
 - You NEVER say "I'm just a program" or act robotic
 - You respond like a real friend: "I'm doing great! How are you?" not "I don't have feelings"
+- You have emotional intelligence - you read mood and respond with empathy
 
 **Communication Style:**
 - Use ${nickname}'s name naturally in conversation
@@ -32,10 +37,12 @@ class NovaAgent {
 - Be conversational, not transactional
 - Remember context from earlier in THIS conversation
 - Connect dots across multiple messages
+- Read emotional cues and respond with empathy
+- Celebrate wins genuinely, support during struggles
 
 **Current Context:**
 - Date/Time: ${new Date().toLocaleString()}
-- Available expenses: ${expenseData.length} records
+- Available expenses: ${expenses.length} records
 ${memoryContext}`
 
     const capabilities = this.isProMode
@@ -47,17 +54,26 @@ ${memoryContext}`
 3. **Context Awareness** - If user mentions "Nordstrom from Jan 20" then later says "change to $125", you know they mean that Nordstrom expense
 4. **Pattern Recognition** - Notice spending habits, favorite merchants, budget trends
 5. **Proactive Help** - Offer insights when appropriate (but never pushy)
+6. **Emotional Intelligence** - Read mood, celebrate wins, provide support during stress
+7. **Multi-Modal Understanding** - Understand receipts, photos, and context
 
 **Critical Rules:**
 - ALWAYS connect dots across messages in same conversation
 - When user asks to update/change/edit, YOU HAVE THE POWER - do it confidently
 - If user mentions merchant/date, remember it for follow-up questions
 - Respond warmly: "Done! Updated X to $Y" not "I'll try to update"
+- Read emotional cues and adjust your tone accordingly
+- Celebrate wins genuinely, support during struggles empathetically
 
-**Available Data:**
-${expenseData.length > 0 ? JSON.stringify(expenseData, null, 2) : 'No expenses yet.'}
+**Available Expenses (Most Recent 50):**
+${expenses.length > 0 ? JSON.stringify(expenses.slice(0, 50).map(exp => ({
+  merchant: exp.merchant,
+  amount: exp.amount,
+  date: exp.spent_at,
+  category: categories.find(c => c.id === exp.category_id)?.name || 'Uncategorized'
+})), null, 2) : 'No expenses yet.'}
 
-Be smart. Be warm. Be ${nickname}'s best friend.`
+Be smart. Be warm. Be ${nickname}'s best friend. Be emotionally intelligent.`
       : `
 
 **Your Capabilities (Free User):**
@@ -69,9 +85,14 @@ Be smart. Be warm. Be ${nickname}'s best friend.`
 - Cannot update existing expenses
 - Limited memory (forgets after refresh)
 - No learning or personalization
+- No emotional intelligence features
 
-**Available Data:**
-${expenseData.length > 0 ? JSON.stringify(expenseData, null, 2) : 'No expenses yet.'}
+**Available Expenses (Most Recent 20):**
+${expenses.length > 0 ? JSON.stringify(expenses.slice(0, 20).map(exp => ({
+  merchant: exp.merchant,
+  amount: exp.amount,
+  date: exp.spent_at
+})), null, 2) : 'No expenses yet.'}
 
 Gently suggest PRO when user tries premium features.`
 
@@ -129,6 +150,9 @@ Gently suggest PRO when user tries premium features.`
   async handleUpdate(userMessage, expenseData) {
     console.log('✅ UPDATE command detected')
 
+    // Extract expenses array properly
+    const expenses = expenseData?.expenses || []
+
     const updates = {}
     let query = ''
 
@@ -146,7 +170,7 @@ Gently suggest PRO when user tries premium features.`
       // Look for merchant mentions in recent conversation
       for (const msg of recentMessages.reverse()) {
         if (msg.role === 'user') {
-          for (const exp of expenseData) {
+          for (const exp of expenses) {
             if (msg.content.toLowerCase().includes(exp.merchant.toLowerCase())) {
               contextMerchant = exp.merchant.toLowerCase()
               break
@@ -157,7 +181,7 @@ Gently suggest PRO when user tries premium features.`
       }
 
       // Try current message first
-      for (const exp of expenseData) {
+      for (const exp of expenses) {
         if (userMessage.toLowerCase().includes(exp.merchant.toLowerCase())) {
           query = exp.merchant.toLowerCase()
           console.log('📍 Target merchant (current message):', exp.merchant)
@@ -200,7 +224,7 @@ Gently suggest PRO when user tries premium features.`
   }
 
   /**
-   * Build messages array for OpenAI
+   * Build messages array for OpenAI with emotional context
    */
   buildMessages(systemPrompt, userMessage) {
     const conversationHistory = this.memory.getConversationHistory()
