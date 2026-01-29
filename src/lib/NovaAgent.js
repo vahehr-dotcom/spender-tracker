@@ -1,3 +1,5 @@
+import EmotionalIntelligence from './EmotionalIntelligence'
+
 /**
  * NovaAgent - The reasoning brain with emotional intelligence
  * Thinks, plans, and acts with tools while understanding emotions
@@ -96,7 +98,33 @@ ${expenses.length > 0 ? JSON.stringify(expenses.slice(0, 20).map(exp => ({
 
 Gently suggest PRO when user tries premium features.`
 
-    return personality + capabilities
+    // 🔥 NEW: Add emotional intelligence context for PRO users
+    let emotionalContext = ''
+    if (this.isProMode) {
+      try {
+        const conversationHistory = this.memory.getConversationHistory()
+        const emotionalIntelligence = new EmotionalIntelligence(
+          this.memory.userId,
+          conversationHistory
+        )
+        
+        emotionalContext = emotionalIntelligence.buildEmotionalContext()
+        
+        // Save mood insight for learning
+        const moodData = emotionalIntelligence.detectMood()
+        if (moodData.confidence > 0.6) {
+          emotionalIntelligence.saveMoodInsight(moodData.mood, moodData.context).catch(err => {
+            console.warn('Could not save mood insight:', err)
+          })
+        }
+        
+        console.log('💜 Emotional Intelligence active:', moodData.mood, `(${(moodData.confidence * 100).toFixed(0)}% confidence)`)
+      } catch (err) {
+        console.error('❌ Emotional Intelligence error:', err)
+      }
+    }
+
+    return personality + capabilities + emotionalContext
   }
 
   /**
