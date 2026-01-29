@@ -113,15 +113,14 @@ Gently suggest PRO when user tries premium features.`
       return await this.handleUpdate(userMessage, expenseData)
     }
 
-    // ADD EXPENSE
-    const addMatch = lower.match(/add\s+\$?(\d+(?:\.\d{2})?)\s+(?:at|to|for)\s+([a-z\s]+?)(?:\s+(today|yesterday|[\w\s]+ago))?$/i)
-    if (addMatch) {
-      const amount = parseFloat(addMatch[1])
-      const merchant = addMatch[2].trim()
-      const dateHint = addMatch[3] || 'today'
-      console.log('➕ ADD detected:', { amount, merchant, dateHint })
-      this.tools.add_expense({ amount, merchant, dateHint })
-      return true
+    // ADD EXPENSE - More flexible pattern matching
+    if (lower.includes('add') && /\$?\d+/.test(lower)) {
+      const parsed = this.parseAddCommand(userMessage)
+      if (parsed) {
+        console.log('➕ ADD detected:', parsed)
+        this.tools.add_expense(parsed)
+        return true
+      }
     }
 
     // SEARCH
@@ -142,6 +141,61 @@ Gently suggest PRO when user tries premium features.`
     }
 
     return false
+  }
+
+  /**
+   * Parse ADD command with flexible natural language understanding
+   */
+  parseAddCommand(userMessage) {
+    const lower = userMessage.toLowerCase()
+
+    // Extract amount (support $20, 20, 20.50, $20.50)
+    const amountMatch = lower.match(/\$?(\d+(?:\.\d{2})?)/)
+    if (!amountMatch) return null
+    const amount = parseFloat(amountMatch[1])
+
+    // Extract merchant - everything after "at/to/for" or after amount
+    let merchant = null
+    
+    // Pattern 1: "add $20 lotto tickets at seven 11"
+    const atMatch = userMessage.match(/(?:at|to|for)\s+([a-z0-9\s]+?)(?:\s+(?:today|yesterday|on|last)|\s*$)/i)
+    if (atMatch) {
+      merchant = atMatch[1].trim()
+    }
+    
+    // Pattern 2: "add $20 seven 11" (merchant right after amount)
+    if (!merchant) {
+      const afterAmount = userMessage.replace(/add\s+\$?\d+(?:\.\d{2})?/i, '').trim()
+      const words = afterAmount.split(/\s+/).filter(w => 
+        !['at', 'to', 'for', 'today', 'yesterday', 'on'].includes(w.toLowerCase())
+      )
+      if (words.length > 0) {
+        merchant = words.join(' ')
+      }
+    }
+
+    // Pattern 3: Extract everything between amount and time words
+    if (!merchant) {
+      const betweenMatch = userMessage.match(/\$?\d+(?:\.\d{2})?\s+(.+?)(?:\s+(?:today|yesterday|[\w\s]+ago)|$)/i)
+      if (betweenMatch) {
+        merchant = betweenMatch[1].replace(/\b(?:at|to|for)\b/gi, '').trim()
+      }
+    }
+
+    if (!merchant) return null
+
+    // Extract date hint
+    let dateHint = 'today'
+    if (lower.includes('yesterday')) dateHint = 'yesterday'
+    else if (lower.match(/\d+\s+days?\s+ago/)) dateHint = lower.match(/\d+\s+days?\s+ago/)[0]
+    else if (lower.match(/\d+\s+weeks?\s+ago/)) dateHint = lower.match(/\d+\s+weeks?\s+ago/)[0]
+    else if (lower.match(/\d+\s+months?\s+ago/)) dateHint = lower.match(/\d+\s+months?\s+ago/)[0]
+
+    return {
+      amount,
+      merchant,
+      dateHint
+    }
   }
 
   /**
