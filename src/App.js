@@ -82,6 +82,29 @@ function App() {
     return () => subscription.unsubscribe()
   }, [])
 
+  // 🆕 Track login with device info
+  useEffect(() => {
+    if (session) {
+      const deviceInfo = {
+        user_agent: navigator.userAgent,
+        platform: navigator.platform,
+        timestamp: new Date().toISOString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      }
+
+      supabase.from('login_logs').insert({
+        user_id: session.user.id,
+        email: session.user.email,
+        device_info: deviceInfo,
+        logged_in_at: new Date().toISOString()
+      }).then(() => {
+        console.log('📝 Login tracked:', session.user.email)
+      }).catch(err => {
+        console.warn('Login tracking failed:', err)
+      })
+    }
+  }, [session])
+
   useEffect(() => {
     if (session) {
       loadSubscription()
