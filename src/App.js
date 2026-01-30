@@ -8,6 +8,7 @@ import ExpenseList from './components/ExpenseList'
 import MonthlySummary from './components/MonthlySummary'
 import FileImport from './components/FileImport'
 import ImportPreview from './components/ImportPreview'
+import LoginHistory from './components/LoginHistory'
 import ProactiveEngine from './lib/ProactiveEngine'
 import PatternAnalyzer from './lib/PatternAnalyzer'
 import PredictiveEngine from './lib/PredictiveEngine'
@@ -16,6 +17,8 @@ function App() {
   const [session, setSession] = useState(null)
   const [subscriptionStatus, setSubscriptionStatus] = useState('free')
   const [showPaywall, setShowPaywall] = useState(false)
+  const [userRole, setUserRole] = useState('user')
+  const [showLoginHistory, setShowLoginHistory] = useState(false)
 
   const [categories, setCategories] = useState([])
   const [expenses, setExpenses] = useState([])
@@ -35,6 +38,7 @@ function App() {
   const [notes, setNotes] = useState('')
 
   const isProMode = subscriptionStatus === 'pro'
+  const isAdmin = userRole === 'admin'
   const [isReimbursable, setIsReimbursable] = useState(false)
   const [employerOrClient, setEmployerOrClient] = useState('')
   const [tagsText, setTagsText] = useState('')
@@ -104,6 +108,33 @@ function App() {
       })
     }
   }, [session])
+
+  // 🆕 Load user role
+  useEffect(() => {
+    if (session) {
+      loadUserRole()
+    }
+  }, [session])
+
+  const loadUserRole = async () => {
+    if (!session) return
+    try {
+      const { data } = await supabase
+        .from('user_preferences')
+        .select('preference_value')
+        .eq('user_id', session.user.id)
+        .eq('preference_type', 'role')
+        .single()
+      
+      if (data) {
+        setUserRole(data.preference_value)
+        console.log('👤 User role:', data.preference_value)
+      }
+    } catch (err) {
+      console.log('No role found, defaulting to user')
+      setUserRole('user')
+    }
+  }
 
   useEffect(() => {
     if (session) {
@@ -736,6 +767,10 @@ function App() {
     return <Login onLogin={login} />
   }
 
+  if (showLoginHistory && isAdmin) {
+    return <LoginHistory onBack={() => setShowLoginHistory(false)} />
+  }
+
   return (
     <div style={{ padding: '20px', fontFamily: 'system-ui, sans-serif', maxWidth: 1400 }}>
       {showPaywall && (
@@ -799,6 +834,22 @@ function App() {
       >
         <h1 style={{ margin: 0 }}>💰 Spender Tracker</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+          {isAdmin && (
+            <button
+              onClick={() => setShowLoginHistory(true)}
+              style={{
+                padding: '8px 16px',
+                background: '#ff9800',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              🔐 Login History
+            </button>
+          )}
           <button
             onClick={() => setShowImport(!showImport)}
             style={{
