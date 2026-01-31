@@ -15,9 +15,9 @@ export default function LoginHistory({ onBack }) {
     setLoading(true)
     try {
       let query = supabase
-        .from('login_logs')
+        .from('user_sessions')
         .select('*')
-        .order('logged_in_at', { ascending: false })
+        .order('session_start', { ascending: false })
 
       // Filter by email
       if (filterEmail) {
@@ -33,7 +33,7 @@ export default function LoginHistory({ onBack }) {
         else if (timeRange === '7d') cutoff.setDate(now.getDate() - 7)
         else if (timeRange === '30d') cutoff.setDate(now.getDate() - 30)
 
-        query = query.gte('logged_in_at', cutoff.toISOString())
+        query = query.gte('session_start', cutoff.toISOString())
       }
 
       const { data, error } = await query.limit(100)
@@ -41,7 +41,7 @@ export default function LoginHistory({ onBack }) {
       if (error) throw error
       setLogs(data || [])
     } catch (err) {
-      console.error('Failed to load login logs:', err)
+      console.error('Failed to load session logs:', err)
       alert('Failed to load login history')
     } finally {
       setLoading(false)
@@ -70,6 +70,18 @@ export default function LoginHistory({ onBack }) {
       hour: '2-digit',
       minute: '2-digit'
     })
+  }
+
+  const formatDuration = (seconds) => {
+    if (!seconds || seconds < 0) return 'Active'
+    
+    const hours = Math.floor(seconds / 3600)
+    const mins = Math.floor((seconds % 3600) / 60)
+    const secs = seconds % 60
+    
+    if (hours > 0) return `${hours}h ${mins}m`
+    if (mins > 0) return `${mins}m ${secs}s`
+    return `${secs}s`
   }
 
   const getDeviceIcon = (platform) => {
@@ -184,17 +196,17 @@ export default function LoginHistory({ onBack }) {
         </button>
 
         <div style={{ marginLeft: 'auto', fontSize: 14, color: '#666' }}>
-          <strong>{logs.length}</strong> login{logs.length !== 1 ? 's' : ''}
+          <strong>{logs.length}</strong> session{logs.length !== 1 ? 's' : ''}
         </div>
       </div>
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40, color: '#666' }}>
-          Loading login history...
+          Loading session history...
         </div>
       ) : logs.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 40, color: '#666' }}>
-          No logins found
+          No sessions found
         </div>
       ) : (
         <div style={{ background: 'white', borderRadius: 8, overflow: 'hidden', border: '1px solid #ddd' }}>
@@ -205,7 +217,9 @@ export default function LoginHistory({ onBack }) {
                 <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Device</th>
                 <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Browser</th>
                 <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Timezone</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>When</th>
+                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Login Time</th>
+                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Duration</th>
+                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -230,7 +244,17 @@ export default function LoginHistory({ onBack }) {
                     {log.device_info?.timezone || 'Unknown'}
                   </td>
                   <td style={{ padding: '12px', fontSize: 14, color: '#666' }}>
-                    {formatDate(log.logged_in_at)}
+                    {formatDate(log.session_start)}
+                  </td>
+                  <td style={{ padding: '12px', fontSize: 14, fontWeight: 'bold' }}>
+                    {formatDuration(log.duration_seconds)}
+                  </td>
+                  <td style={{ padding: '12px', fontSize: 14 }}>
+                    {log.is_active ? (
+                      <span style={{ color: '#4caf50', fontWeight: 'bold' }}>● Active</span>
+                    ) : (
+                      <span style={{ color: '#999' }}>○ Ended</span>
+                    )}
                   </td>
                 </tr>
               ))}
