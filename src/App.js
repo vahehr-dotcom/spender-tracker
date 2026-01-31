@@ -70,6 +70,10 @@ function App() {
   // 🔥 FIX: Store allExpenses in ref so handleAICommand always has latest
   const allExpensesRef = useRef([])
   
+  // 🆕 Session tracking
+  const sessionIdRef = useRef(null)
+  const activityTimerRef = useRef(null)
+  
   useEffect(() => {
     allExpensesRef.current = allExpenses
   }, [allExpenses])
@@ -106,6 +110,77 @@ function App() {
       }).catch(err => {
         console.warn('Login tracking failed:', err)
       })
+    }
+  }, [session])
+
+  // 🆕 Session duration tracking
+  useEffect(() => {
+    if (!session) return
+
+    const startSession = async () => {
+      const deviceInfo = {
+        user_agent: navigator.userAgent,
+        platform: navigator.platform,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      }
+
+      const { data, error } = await supabase
+        .from('user_sessions')
+        .insert({
+          user_id: session.user.id,
+          email: session.user.email,
+          session_start: new Date().toISOString(),
+          device_info: deviceInfo,
+          last_activity: new Date().toISOString(),
+          is_active: true
+        })
+        .select()
+        .single()
+
+      if (!error && data) {
+        sessionIdRef.current = data.id
+        console.log('⏱️ Session started:', data.id)
+      }
+    }
+
+    startSession()
+
+    // Update activity every 30 seconds
+    const activityInterval = setInterval(async () => {
+      if (sessionIdRef.current) {
+        await supabase
+          .from('user_sessions')
+          .update({
+            last_activity: new Date().toISOString()
+          })
+          .eq('id', sessionIdRef.current)
+      }
+    }, 30000)
+
+    // End session on page unload
+    const endSession = async () => {
+      if (sessionIdRef.current) {
+        const sessionStart = new Date(Date.now() - 30000) // Approximate
+        const sessionEnd = new Date()
+        const durationSeconds = Math.floor((sessionEnd - sessionStart) / 1000)
+
+        await supabase
+          .from('user_sessions')
+          .update({
+            session_end: sessionEnd.toISOString(),
+            duration_seconds: durationSeconds,
+            is_active: false
+          })
+          .eq('id', sessionIdRef.current)
+      }
+    }
+
+    window.addEventListener('beforeunload', endSession)
+
+    return () => {
+      clearInterval(activityInterval)
+      window.removeEventListener('beforeunload', endSession)
+      endSession()
     }
   }, [session])
 
