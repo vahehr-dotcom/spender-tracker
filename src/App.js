@@ -113,7 +113,7 @@ function App() {
     }
   }, [session])
 
-  // 🆕 Session duration tracking
+  // 🆕 Session duration tracking - FIXED to prevent duplicates
   useEffect(() => {
     if (!session) return
 
@@ -124,22 +124,44 @@ function App() {
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       }
 
-      const { data, error } = await supabase
+      // Check if there's already an active session
+      const { data: existingSessions } = await supabase
         .from('user_sessions')
-        .insert({
-          user_id: session.user.id,
-          email: session.user.email,
-          session_start: new Date().toISOString(),
-          device_info: deviceInfo,
-          last_activity: new Date().toISOString(),
-          is_active: true
-        })
-        .select()
-        .single()
+        .select('id')
+        .eq('user_id', session.user.id)
+        .eq('is_active', true)
+        .order('session_start', { ascending: false })
+        .limit(1)
 
-      if (!error && data) {
-        sessionIdRef.current = data.id
-        console.log('⏱️ Session started:', data.id)
+      if (existingSessions && existingSessions.length > 0) {
+        // Reuse existing session
+        sessionIdRef.current = existingSessions[0].id
+        console.log('🔄 Continuing existing session:', sessionIdRef.current)
+        
+        // Update last activity
+        await supabase
+          .from('user_sessions')
+          .update({ last_activity: new Date().toISOString() })
+          .eq('id', sessionIdRef.current)
+      } else {
+        // Create new session
+        const { data, error } = await supabase
+          .from('user_sessions')
+          .insert({
+            user_id: session.user.id,
+            email: session.user.email,
+            session_start: new Date().toISOString(),
+            device_info: deviceInfo,
+            last_activity: new Date().toISOString(),
+            is_active: true
+          })
+          .select()
+          .single()
+
+        if (!error && data) {
+          sessionIdRef.current = data.id
+          console.log('⏱️ New session started:', data.id)
+        }
       }
     }
 
@@ -160,18 +182,28 @@ function App() {
     // End session on page unload
     const endSession = async () => {
       if (sessionIdRef.current) {
-        const sessionStart = new Date(Date.now() - 30000) // Approximate
-        const sessionEnd = new Date()
-        const durationSeconds = Math.floor((sessionEnd - sessionStart) / 1000)
-
-        await supabase
+        const { data: sessionData } = await supabase
           .from('user_sessions')
-          .update({
-            session_end: sessionEnd.toISOString(),
-            duration_seconds: durationSeconds,
-            is_active: false
-          })
+          .select('session_start')
           .eq('id', sessionIdRef.current)
+          .single()
+
+        if (sessionData) {
+          const sessionStart = new Date(sessionData.session_start)
+          const sessionEnd = new Date()
+          const durationSeconds = Math.floor((sessionEnd - sessionStart) / 1000)
+
+          await supabase
+            .from('user_sessions')
+            .update({
+              session_end: sessionEnd.toISOString(),
+              duration_seconds: durationSeconds,
+              is_active: false
+            })
+            .eq('id', sessionIdRef.current)
+          
+          console.log('⏹️ Session ended. Duration:', durationSeconds, 'seconds')
+        }
       }
     }
 
