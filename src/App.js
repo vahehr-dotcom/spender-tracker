@@ -73,6 +73,13 @@ function App() {
   // 🆕 Session tracking
   const sessionIdRef = useRef(null)
   const activityTimerRef = useRef(null)
+
+  // 📊 Analytics tracking
+  const currentPageRef = useRef('dashboard')
+  const pageStartTimeRef = useRef(null)
+  const lastActivityRef = useRef(Date.now())
+  const idleTimerRef = useRef(null)
+  const pageViewIdRef = useRef(null)
   
   useEffect(() => {
     allExpensesRef.current = allExpenses
@@ -216,6 +223,124 @@ function App() {
     }
   }, [session])
 
+  // 📊 Page view tracking
+  const trackPageView = useCallback(async (pageName) => {
+    if (!session || !sessionIdRef.current) return
+
+    // End previous page view
+    if (pageViewIdRef.current && pageStartTimeRef.current) {
+      const duration = Math.floor((Date.now() - pageStartTimeRef.current) / 1000)
+      await supabase
+        .from('page_views')
+        .update({ duration_seconds: duration })
+        .eq('id', pageViewIdRef.current)
+    }
+
+    // Start new page view
+    const deviceInfo = {
+      user_agent: navigator.userAgent,
+      platform: navigator.platform,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    }
+
+    const { data, error } = await supabase
+      .from('page_views')
+      .insert({
+        user_id: session.user.id,
+        email: session.user.email,
+        page_name: pageName,
+        page_url: window.location.pathname,
+        session_id: sessionIdRef.current,
+        device_info: deviceInfo,
+        viewed_at: new Date().toISOString()
+      })
+      .select()
+      .single()
+
+    if (!error && data) {
+      pageViewIdRef.current = data.id
+      pageStartTimeRef.current = Date.now()
+      currentPageRef.current = pageName
+      console.log('📄 Page view tracked:', pageName)
+    }
+  }, [session])
+
+  // 📊 Activity tracking
+  const trackActivity = useCallback(async (activityType, activityData = {}) => {
+    if (!session || !sessionIdRef.current) return
+
+    await supabase
+      .from('user_activities')
+      .insert({
+        user_id: session.user.id,
+        email: session.user.email,
+        session_id: sessionIdRef.current,
+        activity_type: activityType,
+        activity_data: activityData,
+        page_name: currentPageRef.current,
+        created_at: new Date().toISOString()
+      })
+
+    console.log('🎯 Activity tracked:', activityType)
+  }, [session])
+
+  // 📊 Idle detection
+  useEffect(() => {
+    if (!session) return
+
+    const resetIdleTimer = () => {
+      lastActivityRef.current = Date.now()
+      
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current)
+      }
+
+      // Set idle after 2 minutes of inactivity
+      idleTimerRef.current = setTimeout(() => {
+        console.log('😴 User is idle')
+        trackActivity('user_idle', { idle_duration: 120 })
+      }, 2 * 60 * 1000)
+    }
+
+    const handleActivity = () => {
+      resetIdleTimer()
+    }
+
+    // Listen to user activity
+    window.addEventListener('mousemove', handleActivity)
+    window.addEventListener('keydown', handleActivity)
+    window.addEventListener('click', handleActivity)
+    window.addEventListener('scroll', handleActivity)
+
+    resetIdleTimer()
+
+    return () => {
+      window.removeEventListener('mousemove', handleActivity)
+      window.removeEventListener('keydown', handleActivity)
+      window.removeEventListener('click', handleActivity)
+      window.removeEventListener('scroll', handleActivity)
+      
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current)
+      }
+    }
+  }, [session, trackActivity])
+
+  // 📊 Track page changes
+  useEffect(() => {
+    if (!session) return
+
+    if (showLoginHistory) {
+      trackPageView('login_history')
+    } else if (importedTransactions.length > 0) {
+      trackPageView('import_preview')
+    } else if (showImport) {
+      trackPageView('import')
+    } else {
+      trackPageView('dashboard')
+    }
+  }, [session, showLoginHistory, showImport, importedTransactions.length, trackPageView])
+
   // 🆕 Load user role
   useEffect(() => {
     if (session) {
@@ -340,6 +465,7 @@ function App() {
     async (file) => {
       if (!file) return
       setIsProcessingReceipt(true)
+      trackActivity('receipt_scan_started')
       try {
         const base64 = await fileToBase64(file)
         const payload = {
@@ -385,13 +511,15 @@ function App() {
         if (parsed.items && parsed.items.length > 0) {
           setNotes(parsed.items.map((it) => `${it.name}: $${it.price}`).join('; '))
         }
+        trackActivity('receipt_scan_success', { merchant: parsed.merchant })
       } catch (err) {
         console.error('OCR error:', err)
+        trackActivity('receipt_scan_failed', { error: err.message })
       } finally {
         setIsProcessingReceipt(false)
       }
     },
-    []
+    [trackActivity]
   )
 
   const loadCategories = useCallback(async () => {
@@ -517,6 +645,7 @@ function App() {
   }
 
   const logout = async () => {
+    trackActivity('logout')
     await supabase.auth.signOut()
     setSession(null)
   }
@@ -533,6 +662,7 @@ function App() {
       alert('Error adding category: ' + error.message)
       return
     }
+    trackActivity('category_added', { category_name: newCategoryName.trim() })
     setNewCategoryName('')
     setShowAddCategory(false)
     await loadCategories()
@@ -602,8 +732,15 @@ function App() {
     setIsSaving(false)
     if (error) {
       setStatus('Error: ' + error.message)
+      trackActivity('expense_add_failed', { error: error.message })
       return
     }
+
+    trackActivity('expense_added', { 
+      amount: parseFloat(amount), 
+      merchant: merchant.trim(),
+      has_receipt: !!receiptUrl
+    })
 
     setSaveSuccess(true)
     setTimeout(() => setSaveSuccess(false), 2000)
@@ -628,8 +765,10 @@ function App() {
     const { error } = await supabase.from('expenses').update(updates).eq('id', id)
     if (error) {
       alert('Update failed: ' + error.message)
+      trackActivity('expense_update_failed', { expense_id: id, error: error.message })
       return
     }
+    trackActivity('expense_updated', { expense_id: id, updates: Object.keys(updates) })
     await loadExpenses()
   }
 
@@ -639,6 +778,7 @@ function App() {
 
   const archiveWithUndo = (expense) => {
     setArchivedForExpense(expense.id, true)
+    trackActivity('expense_archived', { expense_id: expense.id, merchant: expense.merchant })
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current)
     setUndoBanner(expense)
     undoTimerRef.current = setTimeout(() => {
@@ -651,13 +791,16 @@ function App() {
     const { error } = await supabase.from('expenses').delete().eq('id', id)
     if (error) {
       alert('Delete failed: ' + error.message)
+      trackActivity('expense_delete_failed', { expense_id: id, error: error.message })
       return
     }
+    trackActivity('expense_deleted', { expense_id: id })
     await loadExpenses()
   }
 
   const openReceipt = async (receiptPath) => {
     if (!receiptPath) return
+    trackActivity('receipt_viewed', { receipt_path: receiptPath })
     const { data } = await supabase.storage.from('receipts').createSignedUrl(receiptPath, 60 * 10)
     if (data?.signedUrl) {
       window.open(data.signedUrl, '_blank')
@@ -665,6 +808,7 @@ function App() {
   }
 
   const exportCsv = () => {
+    trackActivity('csv_exported', { expense_count: expenses.length })
     const header =
       'Date,Merchant,Amount,Category,Payment Method,Tax Deductible,Reimbursable,Employer/Client,Notes,Tags\n'
     const rows = expenses.map((exp) => {
@@ -692,6 +836,7 @@ function App() {
   }
 
   const runSearch = () => {
+    trackActivity('search_performed', { query: search })
     loadExpenses()
   }
 
@@ -701,17 +846,18 @@ function App() {
   }
 
   const upgradeToPro = () => {
+    trackActivity('upgrade_clicked')
     setShowPaywall(true)
   }
 
   const handleStripeCheckout = async () => {
+    trackActivity('stripe_checkout_initiated')
     alert('Stripe checkout not yet wired. Coming soon!')
   }
 
   const handleAICommand = useCallback(
     async (cmd) => {
       if (cmd.action === 'add_expense') {
-        // 🔥 FIX: Actually insert into database, don't just pre-fill form
         const { merchant: m, amount: a, dateHint, category, notes: aiNotes } = cmd.data
         
         if (!m || !a) {
@@ -725,7 +871,6 @@ function App() {
           if (parsed) spentAt = parsed
         }
 
-        // Auto-suggest category
         let categoryIdToUse = category || null
         if (m && !categoryIdToUse) {
           const suggested = suggestCategoryForMerchant(m)
@@ -751,16 +896,16 @@ function App() {
         if (error) {
           console.error('❌ Add failed:', error)
           alert('Failed to add expense: ' + error.message)
+          trackActivity('ai_add_failed', { error: error.message })
           return
         }
 
         console.log('✅ Expense added successfully')
+        trackActivity('ai_add_success', { merchant: m, amount: a })
         await loadExpenses()
         
       } else if (cmd.action === 'update_expense') {
         const { query, updates } = cmd.data
-
-        // 🔥 FIX: Use ref instead of state
         const currentExpenses = allExpensesRef.current
 
         console.log('🔍 Searching for expense:', query)
@@ -816,22 +961,27 @@ function App() {
 
         if (targetExpense) {
           console.log('🚀 Updating expense:', targetExpense.id, updates)
+          trackActivity('ai_update_success', { query, updates: Object.keys(updates) })
           await updateExpense(targetExpense.id, updates)
         } else {
+          trackActivity('ai_update_failed', { query, reason: 'expense_not_found' })
           alert(`Could not find that expense. Searched for: "${query}"`)
         }
       } else if (cmd.action === 'search') {
         setSearch(cmd.data.query || '')
+        trackActivity('ai_search', { query: cmd.data.query })
         setTimeout(() => loadExpenses(), 100)
       } else if (cmd.action === 'export') {
+        trackActivity('ai_export')
         exportCsv()
       }
     },
-    [session, loadExpenses, suggestCategoryForMerchant]
+    [session, loadExpenses, suggestCategoryForMerchant, trackActivity]
   )
 
   const handleTransactionsParsed = (transactions, fileName) => {
     console.log('📦 Received parsed transactions:', transactions.length, 'from', fileName)
+    trackActivity('import_parsed', { transaction_count: transactions.length, file_name: fileName })
     setImportedTransactions(transactions)
   }
 
@@ -852,9 +1002,11 @@ function App() {
     
     if (error) {
       alert('Import failed: ' + error.message)
+      trackActivity('import_failed', { error: error.message })
       return
     }
 
+    trackActivity('import_success', { transaction_count: selectedTransactions.length })
     alert(`✅ Successfully imported ${selectedTransactions.length} expenses!`)
     setImportedTransactions([])
     setShowImport(false)
@@ -862,6 +1014,7 @@ function App() {
   }
 
   const handleCancelImport = () => {
+    trackActivity('import_cancelled')
     setImportedTransactions([])
     setShowImport(false)
   }
@@ -1036,6 +1189,7 @@ function App() {
               setArchivedForExpense(undoBanner.id, false)
               setUndoBanner(null)
               if (undoTimerRef.current) clearTimeout(undoTimerRef.current)
+              trackActivity('expense_unarchived', { expense_id: undoBanner.id })
             }}
             style={{
               padding: '6px 12px',
