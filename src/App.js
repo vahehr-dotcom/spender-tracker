@@ -20,6 +20,8 @@ function App() {
   const [subscriptionStatus, setSubscriptionStatus] = useState('free')
   const [showPaywall, setShowPaywall] = useState(false)
   const [userRole, setUserRole] = useState('user')
+  const [userName, setUserName] = useState('')
+  const [userTitle, setUserTitle] = useState('')
   const [showLoginHistory, setShowLoginHistory] = useState(false)
   const [showAnalytics, setShowAnalytics] = useState(false)
 
@@ -118,6 +120,8 @@ function App() {
         logged_in_at: new Date().toISOString()
       })
 
+      console.log('📝 Login tracked:', email)
+
       const { data: existingSession } = await supabase
         .from('user_sessions')
         .select('id')
@@ -127,6 +131,7 @@ function App() {
 
       if (existingSession) {
         sessionIdRef.current = existingSession.id
+        console.log('🔄 Continuing existing session:', existingSession.id)
         await supabase
           .from('user_sessions')
           .update({ last_activity: new Date().toISOString() })
@@ -147,6 +152,7 @@ function App() {
 
         if (newSession) {
           sessionIdRef.current = newSession.id
+          console.log('⏱️ New session started:', newSession.id)
         }
       }
 
@@ -165,7 +171,7 @@ function App() {
             .from('user_sessions')
             .select('session_start')
             .eq('id', sessionIdRef.current)
-            .single()
+            .maybeSingle()
 
           if (sess) {
             const start = new Date(sess.session_start)
@@ -307,6 +313,7 @@ function App() {
   useEffect(() => {
     if (session) {
       loadUserRole()
+      loadUserProfile()
     }
   }, [session])
 
@@ -326,7 +333,28 @@ function App() {
       .eq('preference_type', 'role')
       .maybeSingle()
 
-    setUserRole(data?.preference_value || 'user')
+    const role = data?.preference_value || 'user'
+    setUserRole(role)
+    console.log('👤 User role:', role)
+  }
+
+  async function loadUserProfile() {
+    const { data: nameData } = await supabase
+      .from('user_preferences')
+      .select('preference_value')
+      .eq('user_id', session.user.id)
+      .eq('preference_type', 'display_name')
+      .maybeSingle()
+
+    const { data: titleData } = await supabase
+      .from('user_preferences')
+      .select('preference_value')
+      .eq('user_id', session.user.id)
+      .eq('preference_type', 'title')
+      .maybeSingle()
+
+    setUserName(nameData?.preference_value || session.user.email.split('@')[0])
+    setUserTitle(titleData?.preference_value || '')
   }
 
   async function loadSubscription() {
@@ -334,7 +362,7 @@ function App() {
       .from('subscriptions')
       .select('status')
       .eq('user_id', session.user.id)
-      .single()
+      .maybeSingle()
     if (data) {
       setSubscriptionStatus(data.status)
     }
@@ -1087,6 +1115,18 @@ function App() {
 
       <header style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ margin: 0 }}>💰 Nova Expense Tracker</h1>
+        
+        <div style={{ textAlign: 'center', flex: 1 }}>
+          <div style={{ fontSize: 18, fontWeight: 'bold', color: '#333' }}>
+            Hello {userName}
+          </div>
+          {userTitle && (
+            <div style={{ fontSize: 14, color: '#666', marginTop: 4 }}>
+              {userTitle}
+            </div>
+          )}
+        </div>
+
         <div style={{ display: 'flex', gap: 10 }}>
           {isAdmin && (
             <>
