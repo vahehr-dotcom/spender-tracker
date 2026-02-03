@@ -1,4 +1,4 @@
- 1	import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+1	import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
      2	import { supabase } from './supabaseClient'
      3	
      4	import Login from './components/Login'
@@ -1247,7 +1247,7 @@
   1247	      {session?.user && (
   1248	        <div style={{ marginBottom: 20 }}>
   1249	          <ChatAssistant
-  1250	            userId={session.user.id}
+  1250	            userId={session?.user?.id}
   1251	            expenses={allExpenses}
   1252	            categories={categories}
   1253	            onCommand={handleAICommand}
