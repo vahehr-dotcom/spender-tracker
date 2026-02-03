@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom';
 import { supabase } from './supabaseClient';
 import Login from './components/Login';
 import ChatAssistant from './components/ChatAssistant';
@@ -12,7 +13,34 @@ import ProactiveEngine from './lib/ProactiveEngine';
 import PatternAnalyzer from './lib/PatternAnalyzer';
 import PredictiveEngine from './lib/PredictiveEngine';
 
-function App() {
+function LoginHistoryPage() {
+  const navigate = useNavigate();
+  return (
+    <div style={{ padding: 40 }}>
+      <button onClick={() => navigate('/')} style={{ marginBottom: 20, padding: '8px 16px', cursor: 'pointer' }}>
+        ← Back to Dashboard
+      </button>
+      <h2>Login History</h2>
+      <p>Login history data will appear here</p>
+    </div>
+  );
+}
+
+function AnalyticsPage() {
+  const navigate = useNavigate();
+  return (
+    <div style={{ padding: 40 }}>
+      <button onClick={() => navigate('/')} style={{ marginBottom: 20, padding: '8px 16px', cursor: 'pointer' }}>
+        ← Back to Dashboard
+      </button>
+      <h2>Analytics Dashboard</h2>
+      <AnalyticsDashboard />
+    </div>
+  );
+}
+
+function MainApp() {
+  const navigate = useNavigate();
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expenses, setExpenses] = useState([]);
@@ -26,8 +54,6 @@ function App() {
   const [userProfile, setUserProfile] = useState(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState('free');
   const [testMode, setTestMode] = useState(false);
-  const [showLoginHistory, setShowLoginHistory] = useState(false);
-  const [showAnalytics, setShowAnalytics] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [loginStatus, setLoginStatus] = useState('');
   const sessionIdRef = useRef(null);
@@ -663,7 +689,7 @@ function App() {
                 {testMode ? 'Basic Mode' : 'PRO Mode'}
               </button>
               <button
-                onClick={() => setShowLoginHistory(!showLoginHistory)}
+                onClick={() => navigate('/login-history')}
                 style={{
                   padding: '8px 16px',
                   backgroundColor: '#2196f3',
@@ -676,7 +702,7 @@ function App() {
                 Login History
               </button>
               <button
-                onClick={() => setShowAnalytics(!showAnalytics)}
+                onClick={() => navigate('/analytics')}
                 style={{
                   padding: '8px 16px',
                   backgroundColor: '#9c27b0',
@@ -903,19 +929,6 @@ function App() {
         </div>
       )}
 
-      {isAdmin && showLoginHistory && (
-        <div style={{ marginBottom: 20 }}>
-          <h3>Login History</h3>
-          <p>Admin panel - login history will appear here</p>
-        </div>
-      )}
-
-      {isAdmin && showAnalytics && (
-        <div style={{ marginBottom: 20 }}>
-          <AnalyticsDashboard />
-        </div>
-      )}
-
       {showImport && (
         <div style={{ marginBottom: 20 }}>
           <FileImport onComplete={handleImportComplete} />
@@ -975,6 +988,18 @@ function App() {
         onOpenReceipt={openReceipt}
       />
     </div>
+  );
+}
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<MainApp />} />
+        <Route path="/login-history" element={<LoginHistoryPage />} />
+        <Route path="/analytics" element={<AnalyticsPage />} />
+      </Routes>
+    </Router>
   );
 }
 
