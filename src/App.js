@@ -1234,6 +1234,18 @@ function App() {
         </div>
       )}
 
+      {isProMode && (
+        <div style={{ marginBottom: 20 }}>
+          <ChatAssistant
+            userId={session.user.id}
+            expenses={allExpenses}
+            categories={categories}
+            onCommand={handleAICommand}
+            notifications={notifications}
+          />
+        </div>
+      )}
+
       {isProMode && aiInsights && (
         <div
           style={{
@@ -1426,16 +1438,6 @@ function App() {
       />
 
       <MonthlySummary expenses={allExpenses} categories={categories} />
-
-      {isProMode && (
-        <ChatAssistant
-          userId={session.user.id}
-          expenses={allExpenses}
-          categories={categories}
-          onCommand={handleAICommand}
-          notifications={notifications}
-        />
-      )}
     </div>
   )
 }
