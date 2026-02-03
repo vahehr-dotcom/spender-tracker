@@ -42,8 +42,7 @@ function App() {
   const [isTaxDeductible, setIsTaxDeductible] = useState(false)
   const [notes, setNotes] = useState('')
 
- const isProMode = useMemo(() => subscriptionStatus === 'pro', [subscriptionStatus])
-
+  const isProMode = useMemo(() => subscriptionStatus === 'pro', [subscriptionStatus])
   const isAdmin = useMemo(() => userRole === 'admin', [userRole])
 
   const [isReimbursable, setIsReimbursable] = useState(false)
@@ -1013,13 +1012,25 @@ function App() {
     }
   }, [receiptFile])
 
+  async function handleLogin(email, password) {
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      })
+      if (error) throw error
+    } catch (err) {
+      alert('Login failed: ' + err.message)
+    }
+  }
+
   async function handleLogout() {
     await trackActivity('logout')
     await supabase.auth.signOut()
   }
 
   if (!session) {
-    return <Login />
+    return <Login onLogin={handleLogin} />
   }
 
   if (showLoginHistory) {
@@ -1427,4 +1438,5 @@ function App() {
     </div>
   )
 }
+
 export default App
