@@ -18,6 +18,7 @@ import { PredictiveEngine } from './lib/PredictiveEngine'
 function App() {
   const [session, setSession] = useState(null)
   const [subscriptionStatus, setSubscriptionStatus] = useState('free')
+  const [testMode, setTestMode] = useState(false)
   const [showPaywall, setShowPaywall] = useState(false)
   const [userRole, setUserRole] = useState('user')
   const [userName, setUserName] = useState('')
@@ -42,7 +43,11 @@ function App() {
   const [isTaxDeductible, setIsTaxDeductible] = useState(false)
   const [notes, setNotes] = useState('')
 
-  const isProMode = useMemo(() => subscriptionStatus === 'pro', [subscriptionStatus])
+  const isProMode = useMemo(() => {
+    if (testMode) return false
+    return subscriptionStatus === 'pro'
+  }, [subscriptionStatus, testMode])
+  
   const isAdmin = useMemo(() => userRole === 'admin', [userRole])
 
   const [isReimbursable, setIsReimbursable] = useState(false)
@@ -476,7 +481,7 @@ function App() {
   }
 
   useEffect(() => {
-    if (!isProMode || !session) return
+    if (!session) return
 
     let isMounted = true
 
@@ -486,13 +491,15 @@ function App() {
         const existing = await ProactiveEngine.fetchNotifications(session.user.id)
         if (isMounted) setNotifications(existing)
 
-        const generated = await ProactiveEngine.generateNotifications(
-          session.user.id,
-          allExpenses,
-          categories,
-          budgets
-        )
-        if (isMounted) setNotifications((prev) => [...prev, ...generated])
+        if (isProMode) {
+          const generated = await ProactiveEngine.generateNotifications(
+            session.user.id,
+            allExpenses,
+            categories,
+            budgets
+          )
+          if (isMounted) setNotifications((prev) => [...prev, ...generated])
+        }
       } catch (err) {
         console.error('Notification error:', err)
       }
@@ -1140,6 +1147,22 @@ function App() {
         </div>
 
         <div style={{ display: 'flex', gap: 10 }}>
+          {subscriptionStatus === 'pro' && (
+            <button
+              onClick={() => setTestMode(!testMode)}
+              style={{
+                background: testMode ? '#f59e0b' : '#10b981',
+                color: '#fff',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontSize: 12
+              }}
+            >
+              {testMode ? '🧪 Basic Mode' : '✨ PRO Mode'}
+            </button>
+          )}
           {isAdmin && (
             <>
               <button
@@ -1234,17 +1257,16 @@ function App() {
         </div>
       )}
 
-      {isProMode && (
-        <div style={{ marginBottom: 20 }}>
-          <ChatAssistant
-            userId={session.user.id}
-            expenses={allExpenses}
-            categories={categories}
-            onCommand={handleAICommand}
-            notifications={notifications}
-          />
-        </div>
-      )}
+      <div style={{ marginBottom: 20 }}>
+        <ChatAssistant
+          userId={session.user.id}
+          expenses={allExpenses}
+          categories={categories}
+          onCommand={handleAICommand}
+          notifications={notifications}
+          isProMode={isProMode}
+        />
+      </div>
 
       {isProMode && aiInsights && (
         <div
