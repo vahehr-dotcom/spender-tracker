@@ -34,7 +34,7 @@ class ProactiveEngine {
     const patterns = await this.generatePatternNotifications()
     notifications.push(...patterns)
 
-    // 🔥 NEW: 5. Predictive notifications
+    // 5. Predictive notifications
     const predictions = await this.generatePredictiveNotifications()
     notifications.push(...predictions)
 
@@ -61,7 +61,7 @@ class ProactiveEngine {
       .select('preference_value')
       .eq('user_id', this.userId)
       .eq('preference_type', 'name')
-      .single()
+      .maybeSingle()
 
     const name = prefs?.preference_value || 'there'
 
@@ -156,7 +156,7 @@ class ProactiveEngine {
   }
 
   /**
-   * 🔥 NEW: Generate predictive notifications
+   * NEW: Generate predictive notifications
    */
   async generatePredictiveNotifications() {
     const notifications = []
@@ -196,7 +196,7 @@ class ProactiveEngine {
         .eq('user_id', this.userId)
         .eq('notification_type', notification.type)
         .gte('created_at', oneDayAgo.toISOString())
-        .single()
+        .maybeSingle()
 
       if (existing) {
         console.log('⏭️ Skipping duplicate notification:', notification.type)
@@ -251,6 +251,15 @@ class ProactiveEngine {
       console.error('Error dismissing notification:', err)
     }
   }
+
+  /**
+   * Static method to generate notifications (used by App.js)
+   */
+  static async generateNotifications(userId, expenses, categories, budgets) {
+    const engine = new ProactiveEngine(userId, expenses, categories)
+    return await engine.generateNotifications()
+  }
 }
 
 export default ProactiveEngine
+export { ProactiveEngine }
