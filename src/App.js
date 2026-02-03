@@ -42,7 +42,8 @@ function App() {
   const [isTaxDeductible, setIsTaxDeductible] = useState(false)
   const [notes, setNotes] = useState('')
 
-  const isProMode = useMemo(() => subscriptionStatus === 'active', [subscriptionStatus])
+ const isProMode = useMemo(() => subscriptionStatus === 'pro', [subscriptionStatus])
+
   const isAdmin = useMemo(() => userRole === 'admin', [userRole])
 
   const [isReimbursable, setIsReimbursable] = useState(false)
