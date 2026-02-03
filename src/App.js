@@ -8,95 +8,111 @@ import ExpenseList from './components/ExpenseList'
 import MonthlySummary from './components/MonthlySummary'
 import FileImport from './components/FileImport'
 import ImportPreview from './components/ImportPreview'
-import LoginHistory from './components/LoginHistory'
 import AnalyticsDashboard from './components/AnalyticsDashboard'
 
-import { ProactiveEngine } from './lib/ProactiveEngine'
-import { PatternAnalyzer } from './lib/PatternAnalyzer'
-import { PredictiveEngine } from './lib/PredictiveEngine'
+import ProactiveEngine from './lib/ProactiveEngine'
+import PatternAnalyzer from './lib/PatternAnalyzer'
+import PredictiveEngine from './lib/PredictiveEngine'
+
+// Helper: current local datetime string for default spentAt
+function getNowLocalDateTime() {
+  const now = new Date()
+  const offset = now.getTimezoneOffset() * 60000
+  const local = new Date(now.getTime() - offset)
+  return local.toISOString().slice(0, 16)
+}
 
 function App() {
+  // Auth & subscription state
   const [session, setSession] = useState(null)
-  const [subscriptionStatus, setSubscriptionStatus] = useState('free')
-  const [testMode, setTestMode] = useState(false)
+  const [subscriptionStatus, setSubscriptionStatus] = useState('free') // 'free' or 'pro'
+  const [testMode, setTestMode] = useState(false) // Admin testing toggle
   const [showPaywall, setShowPaywall] = useState(false)
-  const [userRole, setUserRole] = useState('user')
+
+  // User profile & role
+  const [userRole, setUserRole] = useState(null)
   const [userName, setUserName] = useState('')
   const [userTitle, setUserTitle] = useState('')
+
+  // UI toggles for admin
   const [showLoginHistory, setShowLoginHistory] = useState(false)
   const [showAnalytics, setShowAnalytics] = useState(false)
 
+  // Categories
   const [categories, setCategories] = useState([])
+
+  // Expenses
   const [expenses, setExpenses] = useState([])
   const [allExpenses, setAllExpenses] = useState([])
 
+  // Add expense form
   const [amount, setAmount] = useState('')
   const [merchant, setMerchant] = useState('')
   const [categoryId, setCategoryId] = useState('')
-  const [paymentMethod, setPaymentMethod] = useState('credit_card')
+  const [paymentMethod, setPaymentMethod] = useState('card')
   const [spentAtLocal, setSpentAtLocal] = useState(getNowLocalDateTime())
-  const [status, setStatus] = useState('settled')
+  const [status, setStatus] = useState('cleared')
   const [isSaving, setIsSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
 
+  // More options
   const [showMoreOptions, setShowMoreOptions] = useState(false)
   const [isTaxDeductible, setIsTaxDeductible] = useState(false)
   const [notes, setNotes] = useState('')
-
-  const isProMode = useMemo(() => {
-    if (testMode) return false
-    return subscriptionStatus === 'pro'
-  }, [subscriptionStatus, testMode])
-  
-  const isAdmin = useMemo(() => userRole === 'admin', [userRole])
-
   const [isReimbursable, setIsReimbursable] = useState(false)
   const [employerOrClient, setEmployerOrClient] = useState('')
   const [tagsText, setTagsText] = useState('')
 
+  // Budgets
   const [budgets, setBudgets] = useState([])
   const [showBudgetPanel, setShowBudgetPanel] = useState(false)
 
+  // AI insights (Pro feature)
   const [aiInsights, setAiInsights] = useState(null)
 
-  const [showAddCategory, setShowAddCategory] = useState(false)
-  const [newCategoryName, setNewCategoryName] = useState('')
-
+  // Receipt upload
   const [receiptFile, setReceiptFile] = useState(null)
   const [receiptUrls, setReceiptUrls] = useState([])
   const [isProcessingReceipt, setIsProcessingReceipt] = useState(false)
 
+  // Archive & search
   const [showArchived, setShowArchived] = useState(false)
   const [search, setSearch] = useState('')
 
+  // Undo banner (for archive undo)
   const [undoBanner, setUndoBanner] = useState(null)
 
+  // Import
   const [showImport, setShowImport] = useState(false)
   const [importedTransactions, setImportedTransactions] = useState([])
 
+  // Notifications (Pro feature)
   const [notifications, setNotifications] = useState([])
 
-  const allExpensesRef = useRef(allExpenses)
+  // Session tracking
   const sessionIdRef = useRef(null)
-  const activityTimerRef = useRef(null)
-  const merchantMemoryRef = useRef({})
-
-  const currentPageRef = useRef('dashboard')
-  const pageStartTimeRef = useRef(Date.now())
   const lastActivityRef = useRef(Date.now())
-  const idleTimerRef = useRef(null)
+  const pageStartRef = useRef(Date.now())
 
-  useEffect(() => {
-    allExpensesRef.current = allExpenses
-  }, [allExpenses])
+  // Merchant memory for category suggestions
+  const merchantMemoryRef = useRef(new Map())
 
+  // Derive Pro mode flag
+  const isProMode = !testMode && subscriptionStatus === 'pro'
+
+  // Derive admin flag
+  const isAdmin = userRole === 'admin'
+
+  // ---------------------------------------------------------------------------
+  // Session & auth setup
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
     })
 
     const {
-      data: { subscription }
+      data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
     })
@@ -104,542 +120,440 @@ function App() {
     return () => subscription.unsubscribe()
   }, [])
 
+  // Track session start/continue and last_activity
   useEffect(() => {
     if (!session?.user) return
 
     const userId = session.user.id
-    const email = session.user.email
 
-    ;(async () => {
-      const deviceInfo = {
-        platform: navigator.platform,
-        user_agent: navigator.userAgent,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        language: navigator.language
+    async function startOrContinueSession() {
+      try {
+        // Check for an active session in last 30 minutes
+        const { data: existing } = await supabase
+          .from('user_sessions')
+          .select('id')
+          .eq('user_id', userId)
+          .is('session_end', null)
+          .order('session_start', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (existing) {
+          sessionIdRef.current = existing.id
+          console.log('[App] Continuing session:', existing.id)
+        } else {
+          // Create new session
+          const { data: newSession } = await supabase
+            .from('user_sessions')
+            .insert({
+              user_id: userId,
+              session_start: new Date().toISOString(),
+            })
+            .select()
+            .single()
+
+          if (newSession) {
+            sessionIdRef.current = newSession.id
+            console.log('[App] New session started:', newSession.id)
+          }
+        }
+      } catch (err) {
+        console.error('[App] startOrContinueSession error:', err)
       }
+    }
 
-      await supabase.from('login_logs').insert({
-        user_id: userId,
-        email,
-        device_info: deviceInfo,
-        logged_in_at: new Date().toISOString()
-      })
+    startOrContinueSession()
 
-      console.log('📝 Login tracked:', email)
-
-      const { data: existingSession } = await supabase
-        .from('user_sessions')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('is_active', true)
-        .maybeSingle()
-
-      if (existingSession) {
-        sessionIdRef.current = existingSession.id
-        console.log('🔄 Continuing existing session:', existingSession.id)
+    // Track last_activity every 30s
+    const activityInterval = setInterval(async () => {
+      if (sessionIdRef.current) {
+        lastActivityRef.current = Date.now()
         await supabase
           .from('user_sessions')
           .update({ last_activity: new Date().toISOString() })
-          .eq('id', existingSession.id)
-      } else {
-        const { data: newSession } = await supabase
+          .eq('id', sessionIdRef.current)
+      }
+    }, 30000)
+
+    // On unload, finalize session
+    const handleUnload = async () => {
+      if (sessionIdRef.current) {
+        const start = pageStartRef.current
+        const end = Date.now()
+        const duration = Math.floor((end - start) / 1000)
+        await supabase
           .from('user_sessions')
-          .insert({
-            user_id: userId,
-            email,
-            session_start: new Date().toISOString(),
-            device_info: deviceInfo,
-            last_activity: new Date().toISOString(),
-            is_active: true
+          .update({
+            session_end: new Date().toISOString(),
+            duration_seconds: duration,
           })
-          .select('id')
-          .single()
-
-        if (newSession) {
-          sessionIdRef.current = newSession.id
-          console.log('⏱️ New session started:', newSession.id)
-        }
+          .eq('id', sessionIdRef.current)
       }
+    }
 
-      activityTimerRef.current = setInterval(async () => {
-        if (sessionIdRef.current) {
-          await supabase
-            .from('user_sessions')
-            .update({ last_activity: new Date().toISOString() })
-            .eq('id', sessionIdRef.current)
-        }
-      }, 30000)
-
-      const handleBeforeUnload = async () => {
-        if (sessionIdRef.current) {
-          const { data: sess } = await supabase
-            .from('user_sessions')
-            .select('session_start')
-            .eq('id', sessionIdRef.current)
-            .maybeSingle()
-
-          if (sess) {
-            const start = new Date(sess.session_start)
-            const end = new Date()
-            const duration = Math.floor((end - start) / 1000)
-
-            await supabase
-              .from('user_sessions')
-              .update({
-                session_end: end.toISOString(),
-                duration_seconds: duration,
-                is_active: false
-              })
-              .eq('id', sessionIdRef.current)
-          }
-        }
-      }
-
-      window.addEventListener('beforeunload', handleBeforeUnload)
-
-      return () => {
-        window.removeEventListener('beforeunload', handleBeforeUnload)
-        if (activityTimerRef.current) {
-          clearInterval(activityTimerRef.current)
-        }
-      }
-    })()
+    window.addEventListener('beforeunload', handleUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleUnload)
+      clearInterval(activityInterval)
+    }
   }, [session])
 
+  // Track login event
+  useEffect(() => {
+    if (!session?.user) return
+
+    async function trackLogin() {
+      try {
+        await supabase.from('login_logs').insert({
+          user_id: session.user.id,
+          email: session.user.email,
+        })
+        console.log('[App] Login tracked:', session.user.email)
+      } catch (err) {
+        console.error('[App] trackLogin error:', err)
+      }
+    }
+
+    trackLogin()
+  }, [session])
+
+  // Track page views
   const trackPageView = useCallback(
     async (pageName) => {
       if (!session?.user || !sessionIdRef.current) return
 
-      const prevPage = currentPageRef.current
-      const prevStart = pageStartTimeRef.current
-      const now = Date.now()
-
-      if (prevStart) {
-        const duration = Math.floor((now - prevStart) / 1000)
-        await supabase
-          .from('page_views')
-          .update({ duration_seconds: duration })
-          .eq('session_id', sessionIdRef.current)
-          .eq('page_name', prevPage)
-          .is('duration_seconds', null)
+      try {
+        await supabase.from('page_views').insert({
+          user_id: session.user.id,
+          session_id: sessionIdRef.current,
+          page_name: pageName,
+          page_url: window.location.href,
+          device_info: navigator.userAgent,
+        })
+        console.log('[App] Page view tracked:', pageName)
+      } catch (err) {
+        console.error('[App] trackPageView error:', err)
       }
-
-      const deviceInfo = {
-        platform: navigator.platform,
-        user_agent: navigator.userAgent,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-      }
-
-      await supabase.from('page_views').insert({
-        user_id: session.user.id,
-        email: session.user.email,
-        page_name: pageName,
-        page_url: window.location.href,
-        session_id: sessionIdRef.current,
-        device_info: deviceInfo,
-        viewed_at: new Date().toISOString()
-      })
-
-      currentPageRef.current = pageName
-      pageStartTimeRef.current = now
     },
     [session]
   )
 
-  const trackActivity = useCallback(
-    async (activityType, activityData = {}) => {
-      if (!session?.user || !sessionIdRef.current) return
-
-      await supabase.from('user_activities').insert({
-        user_id: session.user.id,
-        email: session.user.email,
-        session_id: sessionIdRef.current,
-        activity_type: activityType,
-        activity_data: activityData,
-        page_name: currentPageRef.current,
-        created_at: new Date().toISOString()
-      })
-    },
-    [session]
-  )
-
-  const updateIdleStatus = useCallback(() => {
-    const now = Date.now()
-    const idleThreshold = 2 * 60 * 1000
-
-    if (now - lastActivityRef.current > idleThreshold) {
-      trackActivity('idle_detected')
-    }
-
-    lastActivityRef.current = now
-  }, [trackActivity])
-
   useEffect(() => {
-    const handleActivity = () => {
-      updateIdleStatus()
+    if (session?.user) {
+      trackPageView('Dashboard')
     }
+  }, [session, trackPageView])
 
-    window.addEventListener('mousemove', handleActivity)
-    window.addEventListener('keydown', handleActivity)
-    window.addEventListener('click', handleActivity)
-    window.addEventListener('scroll', handleActivity)
+  // ---------------------------------------------------------------------------
+  // Load user role, profile, subscription
+  // ---------------------------------------------------------------------------
+  const loadUserRole = useCallback(async (userId) => {
+    try {
+      const { data } = await supabase
+        .from('user_preferences')
+        .select('role')
+        .eq('user_id', userId)
+        .maybeSingle()
 
-    idleTimerRef.current = setInterval(() => {
-      updateIdleStatus()
-    }, 60000)
-
-    return () => {
-      window.removeEventListener('mousemove', handleActivity)
-      window.removeEventListener('keydown', handleActivity)
-      window.removeEventListener('click', handleActivity)
-      window.removeEventListener('scroll', handleActivity)
-      if (idleTimerRef.current) {
-        clearInterval(idleTimerRef.current)
+      if (data?.role) {
+        setUserRole(data.role)
       }
+    } catch (err) {
+      console.error('[App] loadUserRole error:', err)
     }
-  }, [updateIdleStatus])
+  }, [])
 
-  useEffect(() => {
-    if (!session) return
+  const loadUserProfile = useCallback(async (userId) => {
+    try {
+      const { data } = await supabase
+        .from('user_preferences')
+        .select('display_name, title')
+        .eq('user_id', userId)
+        .maybeSingle()
 
-    if (showLoginHistory) {
-      trackPageView('login_history')
-    } else if (showAnalytics) {
-      trackPageView('analytics')
-    } else if (showImport) {
-      trackPageView('import')
-    } else if (importedTransactions.length > 0) {
-      trackPageView('import_preview')
-    } else {
-      trackPageView('dashboard')
+      if (data) {
+        setUserName(data.display_name || '')
+        setUserTitle(data.title || '')
+      }
+    } catch (err) {
+      console.error('[App] loadUserProfile error:', err)
     }
-  }, [session, showLoginHistory, showAnalytics, showImport, importedTransactions, trackPageView])
+  }, [])
 
-  useEffect(() => {
-    if (session) {
-      loadUserRole()
-      loadUserProfile()
+  const loadSubscription = useCallback(async (userId) => {
+    try {
+      const { data } = await supabase
+        .from('subscriptions')
+        .select('status')
+        .eq('user_id', userId)
+        .maybeSingle()
+
+      // Auto-PRO for CEO and testers (you can list emails or roles here)
+      const ceoEmail = 'lifeliftusa@gmail.com'
+      const testEmails = ['tester1@example.com', 'tester2@example.com'] // add your test emails
+      const userEmail = session?.user?.email
+
+      if (userEmail === ceoEmail || testEmails.includes(userEmail)) {
+        setSubscriptionStatus('pro')
+      } else if (data?.status === 'pro') {
+        setSubscriptionStatus('pro')
+      } else {
+        setSubscriptionStatus('free')
+      }
+    } catch (err) {
+      console.error('[App] loadSubscription error:', err)
+      setSubscriptionStatus('free')
     }
   }, [session])
 
   useEffect(() => {
-    if (session) {
-      loadSubscription()
-      loadCategories()
-      loadExpenses()
+    if (session?.user) {
+      loadUserRole(session.user.id)
+      loadUserProfile(session.user.id)
+      loadSubscription(session.user.id)
     }
-  }, [session])
+  }, [session, loadUserRole, loadUserProfile, loadSubscription])
 
-  async function loadUserRole() {
-    const { data } = await supabase
-      .from('user_preferences')
-      .select('preference_value')
-      .eq('user_id', session.user.id)
-      .eq('preference_type', 'role')
-      .maybeSingle()
+  // ---------------------------------------------------------------------------
+  // Load categories
+  // ---------------------------------------------------------------------------
+  const loadCategories = useCallback(async (userId) => {
+    try {
+      const { data } = await supabase
+        .from('categories')
+        .select('id, name, icon, color')
+        .eq('user_id', userId)
+        .order('name')
 
-    const role = data?.preference_value || 'user'
-    setUserRole(role)
-    console.log('👤 User role:', role)
-  }
-
-  async function loadUserProfile() {
-    const { data: nameData } = await supabase
-      .from('user_preferences')
-      .select('preference_value')
-      .eq('user_id', session.user.id)
-      .eq('preference_type', 'display_name')
-      .maybeSingle()
-
-    const { data: titleData } = await supabase
-      .from('user_preferences')
-      .select('preference_value')
-      .eq('user_id', session.user.id)
-      .eq('preference_type', 'title')
-      .maybeSingle()
-
-    setUserName(nameData?.preference_value || session.user.email.split('@')[0])
-    setUserTitle(titleData?.preference_value || '')
-  }
-
-  async function loadSubscription() {
-    const { data } = await supabase
-      .from('subscriptions')
-      .select('status')
-      .eq('user_id', session.user.id)
-      .maybeSingle()
-    if (data) {
-      setSubscriptionStatus(data.status)
+      if (data) {
+        setCategories(data)
+      }
+    } catch (err) {
+      console.error('[App] loadCategories error:', err)
     }
-  }
+  }, [])
 
-  async function loadCategories() {
-    const { data } = await supabase
-      .from('categories')
-      .select('id, name, icon, color')
-      .order('name')
-    setCategories(data || [])
-  }
-
-  async function loadExpenses() {
-    let query = supabase
-      .from('expenses')
-      .select(
-        'id, user_id, category_id, merchant, amount, payment_method, spent_at, created_at, status, notes, is_tax_deductible, is_reimbursable, employer_or_client, tags, location, receipt_image_url, archived'
-      )
-      .eq('user_id', session.user.id)
-
-    if (!showArchived) {
-      query = query.or('archived.is.null,archived.eq.false')
+  useEffect(() => {
+    if (session?.user) {
+      loadCategories(session.user.id)
     }
+  }, [session, loadCategories])
 
-    if (search) {
-      query = query.or(
-        `merchant.ilike.${escapeIlike(search)},notes.ilike.${escapeIlike(search)},tags.cs.{${search}}`
-      )
-    }
+  // ---------------------------------------------------------------------------
+  // Load expenses
+  // ---------------------------------------------------------------------------
+  const loadExpenses = useCallback(
+    async (userId) => {
+      try {
+        const { data: allData } = await supabase
+          .from('expenses')
+          .select('*')
+          .eq('user_id', userId)
+          .order('spent_at', { ascending: false })
 
-    query = query.order('spent_at', { ascending: false }).limit(100)
+        if (allData) {
+          setAllExpenses(allData)
 
-    const { data, error } = await query
-    if (error) {
-      console.error('Failed to load expenses:', error)
-    } else {
-      setExpenses(data || [])
-    }
+          // Build merchant memory for category suggestions
+          const map = new Map()
+          allData.forEach((exp) => {
+            if (exp.merchant && exp.category_id) {
+              map.set(exp.merchant.toLowerCase(), exp.category_id)
+            }
+          })
+          merchantMemoryRef.current = map
 
-    const { data: allData } = await supabase
-      .from('expenses')
-      .select('id, merchant, amount, category_id, spent_at, status, notes, is_tax_deductible, tags, receipt_image_url')
-      .eq('user_id', session.user.id)
-      .order('spent_at', { ascending: false })
+          // Filter for current view
+          let filtered = allData.filter((e) => {
+            if (showArchived && !e.archived) return false
+            if (!showArchived && e.archived) return false
+            return true
+          })
 
-    setAllExpenses(allData || [])
+          if (search) {
+            const lowerSearch = search.toLowerCase()
+            filtered = filtered.filter(
+              (e) =>
+                e.merchant?.toLowerCase().includes(lowerSearch) ||
+                e.notes?.toLowerCase().includes(lowerSearch)
+            )
+          }
 
-    const memoryMap = {}
-    if (allData) {
-      for (const exp of allData) {
-        if (exp.merchant && exp.category_id) {
-          memoryMap[exp.merchant.toLowerCase()] = exp.category_id
+          setExpenses(filtered)
         }
+      } catch (err) {
+        console.error('[App] loadExpenses error:', err)
       }
-    }
-    merchantMemoryRef.current = memoryMap
-  }
-
-  function escapeIlike(str) {
-    return '%' + str.replace(/%/g, '\\%').replace(/_/g, '\\_') + '%'
-  }
+    },
+    [showArchived, search]
+  )
 
   useEffect(() => {
-    if (isProMode && allExpenses.length && categories.length) {
-      calculateAIInsights()
+    if (session?.user) {
+      loadExpenses(session.user.id)
+    }
+  }, [session, showArchived, search, loadExpenses])
+
+  // ---------------------------------------------------------------------------
+  // AI Insights (Pro feature)
+  // ---------------------------------------------------------------------------
+  const calculateAIInsights = useCallback(() => {
+    if (!isProMode || allExpenses.length === 0) {
+      setAiInsights(null)
+      return
+    }
+
+    try {
+      const now = new Date()
+      const currentMonth = now.getMonth()
+      const currentYear = now.getFullYear()
+
+      const thisMonthExpenses = allExpenses.filter((e) => {
+        if (e.archived) return false
+        const d = new Date(e.spent_at)
+        return d.getMonth() === currentMonth && d.getFullYear() === currentYear
+      })
+
+      // Forecast: sum of this month's expenses
+      const forecastTotal = thisMonthExpenses.reduce((sum, e) => sum + (e.amount || 0), 0)
+
+      // Recurring expenses: merchants appearing 2+ times this month
+      const merchantCounts = {}
+      thisMonthExpenses.forEach((e) => {
+        const m = e.merchant || 'Unknown'
+        merchantCounts[m] = (merchantCounts[m] || 0) + 1
+      })
+      const recurringExpenses = Object.keys(merchantCounts).filter(
+        (m) => merchantCounts[m] >= 2
+      )
+
+      // Top categories by spending
+      const categorySpending = {}
+      thisMonthExpenses.forEach((e) => {
+        const cat = categories.find((c) => c.id === e.category_id)
+        const name = cat?.name || 'Unknown'
+        categorySpending[name] = (categorySpending[name] || 0) + (e.amount || 0)
+      })
+      const sorted = Object.entries(categorySpending)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([name, spent]) => ({ name, spent }))
+
+      setAiInsights({
+        forecastTotal,
+        recurringExpenses,
+        categorySpending: sorted,
+      })
+    } catch (err) {
+      console.error('[App] calculateAIInsights error:', err)
     }
   }, [isProMode, allExpenses, categories])
 
-  function calculateAIInsights() {
-    const now = new Date()
-    const currentMonth = now.getMonth()
-    const currentYear = now.getFullYear()
-
-    const thisMonthExpenses = allExpenses.filter((e) => {
-      const d = new Date(e.spent_at)
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear
-    })
-
-    const total = thisMonthExpenses.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0)
-    const dayOfMonth = now.getDate()
-    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate()
-    const forecastTotal = (total / dayOfMonth) * daysInMonth
-
-    const merchantCounts = {}
-    for (const exp of thisMonthExpenses) {
-      const m = (exp.merchant || 'Unknown').toLowerCase()
-      merchantCounts[m] = (merchantCounts[m] || 0) + 1
-    }
-    const recurringExpenses = Object.keys(merchantCounts).filter((k) => merchantCounts[k] >= 2)
-
-    const catSpend = {}
-    for (const exp of thisMonthExpenses) {
-      const cid = exp.category_id
-      catSpend[cid] = (catSpend[cid] || 0) + parseFloat(exp.amount || 0)
-    }
-    const categorySpending = categories
-      .map((cat) => ({
-        ...cat,
-        spent: catSpend[cat.id] || 0
-      }))
-      .filter((c) => c.spent > 0)
-      .sort((a, b) => b.spent - a.spent)
-      .slice(0, 5)
-
-    setAiInsights({
-      forecastTotal,
-      recurringExpenses,
-      categorySpending
-    })
-  }
-
   useEffect(() => {
-    if (!session) return
+    if (isProMode && allExpenses.length > 0 && categories.length > 0) {
+      calculateAIInsights()
+    }
+  }, [isProMode, allExpenses, categories, calculateAIInsights])
 
-    let isMounted = true
+  // ---------------------------------------------------------------------------
+  // Proactive notifications (Pro feature) - DISABLED FOR PRO USERS
+  // ---------------------------------------------------------------------------
+  // Removed notification fetching for PRO users - they get empty array
 
-    async function fetchAndGenerate() {
-      if (!isMounted) return
-      try {
-        const existing = await ProactiveEngine.fetchNotifications(session.user.id)
-        if (isMounted) setNotifications(existing)
+  // ---------------------------------------------------------------------------
+  // AI command handler (Nova)
+  // ---------------------------------------------------------------------------
+  const handleAICommand = useCallback(
+    async (command) => {
+      console.log('[App] AI command received:', command)
 
-        if (isProMode) {
-          const generated = await ProactiveEngine.generateNotifications(
-            session.user.id,
-            allExpenses,
-            categories,
-            budgets
+      if (command.action === 'add_expense') {
+        const { merchant: m, amount: a, category: c, date_hint } = command
+
+        // Validate amount
+        if (!a || isNaN(a) || a <= 0) {
+          console.warn('[App] Invalid amount:', a)
+          return
+        }
+
+        // Resolve category
+        let resolvedCategoryId = categoryId
+        if (c) {
+          const found = categories.find(
+            (cat) => cat.name.toLowerCase() === c.toLowerCase()
           )
-          if (isMounted) setNotifications((prev) => [...prev, ...generated])
-        }
-      } catch (err) {
-        console.error('Notification error:', err)
-      }
-    }
-
-    fetchAndGenerate()
-
-    const interval = setInterval(() => {
-      if (isMounted) fetchAndGenerate()
-    }, 5 * 60 * 1000)
-
-    return () => {
-      isMounted = false
-      clearInterval(interval)
-    }
-  }, [isProMode, session, allExpenses, categories, budgets])
-
-  async function handleAICommand(command) {
-    trackActivity('ai_command_used', { command })
-
-    if (command.action === 'add_expense') {
-      try {
-        const amtNum = parseFloat(command.amount || 0)
-        if (isNaN(amtNum) || amtNum <= 0) {
-          return { success: false, message: 'Invalid amount' }
+          if (found) {
+            resolvedCategoryId = found.id
+          }
         }
 
-        let dateStr = new Date().toISOString()
-        if (command.dateHint) {
-          const parsed = parseNaturalDate(command.dateHint)
-          if (parsed) dateStr = parsed
+        // Resolve date
+        let resolvedDate = spentAtLocal
+        if (date_hint) {
+          const parsed = parseNaturalDate(date_hint)
+          if (parsed) {
+            resolvedDate = parsed
+          }
         }
 
-        let finalCat = command.category_id
-        if (!finalCat && command.merchant) {
-          finalCat = await suggestCategoryForMerchant(command.merchant)
-        }
-        if (!finalCat && categories.length) {
-          finalCat = categories[0].id
-        }
+        // Set form
+        setMerchant(m || '')
+        setAmount(String(a))
+        setCategoryId(resolvedCategoryId)
+        setSpentAtLocal(resolvedDate)
 
-        const { error } = await supabase.from('expenses').insert({
-          user_id: session.user.id,
-          merchant: command.merchant || 'Unnamed',
-          amount: amtNum,
-          category_id: finalCat,
-          payment_method: command.payment_method || 'credit_card',
-          spent_at: dateStr,
-          status: 'settled'
-        })
+        // Auto-submit
+        setTimeout(() => {
+          const btn = document.querySelector('button[type="submit"]')
+          if (btn) btn.click()
+        }, 100)
 
-        if (error) throw error
-
-        await loadExpenses()
-        await trackActivity('expense_added', { merchant: command.merchant, amount: amtNum })
-        return { success: true, message: 'Expense added!' }
-      } catch (err) {
-        console.error('AI add failed:', err)
-        await trackActivity('ai_add_failed')
-        return { success: false, message: 'Failed to add expense' }
-      }
-    }
-
-    if (command.action === 'update_expense') {
-      const all = allExpensesRef.current
-      let target = all.find((e) => e.id === command.id)
-      if (!target && command.merchant) {
-        target = all.find(
-          (e) => e.merchant && e.merchant.toLowerCase().includes(command.merchant.toLowerCase())
-        )
-      }
-      if (!target) {
-        target = all[0]
+        return
       }
 
-      if (target) {
-        const updated = { ...target }
-        if (command.merchant) updated.merchant = command.merchant
-        if (command.amount !== undefined) updated.amount = parseFloat(command.amount)
-        if (command.category_id) updated.category_id = command.category_id
-        if (command.notes !== undefined) updated.notes = command.notes
+      if (command.action === 'update_expense') {
+        const { target, updates } = command
+        let expenseToUpdate = null
 
-        const { error } = await supabase.from('expenses').update(updated).eq('id', target.id)
-        if (!error) {
-          await loadExpenses()
-          await trackActivity('ai_update_success')
-          return { success: true, message: 'Expense updated!' }
+        if (target?.id) {
+          expenseToUpdate = expenses.find((e) => e.id === target.id)
+        } else if (target?.merchant) {
+          expenseToUpdate = expenses.find(
+            (e) => e.merchant?.toLowerCase() === target.merchant.toLowerCase()
+          )
         }
+
+        if (expenseToUpdate && updates) {
+          await updateExpense(expenseToUpdate.id, updates)
+          await loadExpenses(session.user.id)
+        }
+
+        return
       }
-      return { success: false, message: 'Could not find expense to update' }
-    }
 
-    if (command.action === 'search') {
-      setSearch(command.query || '')
-      await trackActivity('search_performed', { query: command.query })
-      return { success: true, message: `Searching for: ${command.query}` }
-    }
+      if (command.action === 'search') {
+        setSearch(command.query || '')
+        return
+      }
 
-    if (command.action === 'export') {
-      exportCsv()
-      return { success: true, message: 'Exporting expenses as CSV...' }
-    }
+      if (command.action === 'export') {
+        exportCsv()
+        return
+      }
+    },
+    [
+      categoryId,
+      spentAtLocal,
+      categories,
+      expenses,
+      session,
+      loadExpenses,
+    ]
+  )
 
-    return { success: false, message: 'Unknown command' }
-  }
-
-  async function suggestCategoryForMerchant(merchantName) {
-    const lower = merchantName.toLowerCase()
-    const memory = merchantMemoryRef.current
-    if (memory[lower]) return memory[lower]
-
-    if (!categories.length) return null
-
-    const prompt = `User bought from "${merchantName}". Available categories: ${categories.map((c) => c.name).join(', ')}. Which category fits best? Reply ONLY with the category name.`
-
-    try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.3
-        })
-      })
-      const json = await res.json()
-      const suggestion = json.choices[0]?.message?.content?.trim()
-      const match = categories.find(
-        (c) => c.name.toLowerCase() === suggestion?.toLowerCase()
-      )
-      return match ? match.id : categories[0].id
-    } catch (err) {
-      console.error('AI category suggestion failed:', err)
-      return categories[0].id
-    }
-  }
-
+  // ---------------------------------------------------------------------------
+  // Helper: parse natural date strings
+  // ---------------------------------------------------------------------------
   function parseNaturalDate(hint) {
     const lower = hint.toLowerCase()
     const now = new Date()
@@ -647,587 +561,664 @@ function App() {
     if (lower.includes('yesterday')) {
       const d = new Date(now)
       d.setDate(d.getDate() - 1)
-      return d.toISOString()
+      return d.toISOString().slice(0, 16)
     }
-    if (lower.match(/\d+ days? ago/)) {
-      const match = lower.match(/(\d+) days? ago/)
-      if (match) {
-        const days = parseInt(match[1], 10)
-        const d = new Date(now)
-        d.setDate(d.getDate() - days)
-        return d.toISOString()
-      }
+
+    const daysAgoMatch = lower.match(/(\d+)\s*days?\s*ago/)
+    if (daysAgoMatch) {
+      const days = parseInt(daysAgoMatch[1], 10)
+      const d = new Date(now)
+      d.setDate(d.getDate() - days)
+      return d.toISOString().slice(0, 16)
     }
+
     if (lower.includes('last week')) {
       const d = new Date(now)
       d.setDate(d.getDate() - 7)
-      return d.toISOString()
+      return d.toISOString().slice(0, 16)
     }
 
     return null
   }
 
-  async function processReceiptWithOCR() {
-    if (!receiptFile) return
+  // ---------------------------------------------------------------------------
+  // Category suggestion using merchant memory + OpenAI fallback
+  // ---------------------------------------------------------------------------
+  const suggestCategoryForMerchant = useCallback(
+    async (merchantName) => {
+      if (!merchantName) return categoryId
 
-    setIsProcessingReceipt(true)
-    await trackActivity('receipt_scan_started')
+      const lowerMerchant = merchantName.toLowerCase()
 
-    try {
-      const base64 = await fileToBase64(receiptFile)
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: 'Extract merchant name, amount, date, and itemized list from this receipt. Return JSON only: {"merchant": "...", "amount": 0.00, "date": "YYYY-MM-DD", "items": ["item1", "item2"]}'
-                },
-                {
-                  type: 'image_url',
-                  image_url: { url: base64 }
-                }
-              ]
-            }
-          ],
-          max_tokens: 500
+      // Check memory first
+      if (merchantMemoryRef.current.has(lowerMerchant)) {
+        return merchantMemoryRef.current.get(lowerMerchant)
+      }
+
+      // Fallback to OpenAI
+      try {
+        const apiKey = process.env.REACT_APP_OPENAI_API_KEY
+        if (!apiKey) {
+          console.warn('[App] No OpenAI API key found')
+          return categories[0]?.id || ''
+        }
+
+        const categoryNames = categories.map((c) => c.name).join(', ')
+        const prompt = `You are a helpful assistant. Given the merchant name "${merchantName}", suggest the most appropriate category from this list: ${categoryNames}. Respond with only the category name.`
+
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 50,
+          }),
         })
-      })
-      const json = await res.json()
-      const content = json.choices[0]?.message?.content || '{}'
-      const parsed = JSON.parse(content)
 
-      setMerchant(parsed.merchant || '')
-      setAmount(parsed.amount ? String(parsed.amount) : '')
-      if (parsed.date) {
-        setSpentAtLocal(parsed.date + 'T12:00')
+        const json = await res.json()
+        const suggested = json.choices?.[0]?.message?.content?.trim()
+
+        if (suggested) {
+          const found = categories.find(
+            (c) => c.name.toLowerCase() === suggested.toLowerCase()
+          )
+          if (found) {
+            merchantMemoryRef.current.set(lowerMerchant, found.id)
+            return found.id
+          }
+        }
+
+        return categories[0]?.id || ''
+      } catch (err) {
+        console.error('[App] suggestCategoryForMerchant error:', err)
+        return categories[0]?.id || ''
       }
-      if (parsed.items && parsed.items.length) {
-        setNotes('Items: ' + parsed.items.join(', '))
+    },
+    [categoryId, categories]
+  )
+
+  // ---------------------------------------------------------------------------
+  // Receipt OCR processing with OpenAI
+  // ---------------------------------------------------------------------------
+  const processReceiptWithOCR = useCallback(
+    async (file) => {
+      if (!file) return
+
+      setIsProcessingReceipt(true)
+
+      try {
+        const userId = session?.user?.id
+        if (!userId) throw new Error('No user ID')
+
+        // Upload to storage
+        const sanitized = sanitizeFilename(file.name)
+        const filePath = `${userId}/${Date.now()}_${sanitized}`
+        const { error: uploadError } = await supabase.storage
+          .from('receipts')
+          .upload(filePath, file)
+
+        if (uploadError) throw uploadError
+
+        const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(filePath)
+        const publicUrl = urlData?.publicUrl || ''
+
+        if (publicUrl) {
+          setReceiptUrls((prev) => [...prev, publicUrl])
+        }
+
+        // Convert to base64 for OpenAI
+        const base64 = await fileToBase64(file)
+
+        // Call OpenAI Vision
+        const apiKey = process.env.REACT_APP_OPENAI_API_KEY
+        if (!apiKey) throw new Error('No OpenAI API key')
+
+        const prompt = `Extract the following information from this receipt image in JSON format:
+{
+  "merchant": "name of merchant",
+  "amount": <total amount as number>,
+  "date": "YYYY-MM-DD",
+  "items": ["item1", "item2"]
+}
+If any field is missing, use null.`
+
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: prompt },
+                  { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } },
+                ],
+              },
+            ],
+            max_tokens: 500,
+          }),
+        })
+
+        const json = await res.json()
+        const content = json.choices?.[0]?.message?.content?.trim()
+
+        if (content) {
+          const parsed = JSON.parse(content)
+          if (parsed.merchant) setMerchant(parsed.merchant)
+          if (parsed.amount) setAmount(String(parsed.amount))
+          if (parsed.date) {
+            const d = new Date(parsed.date)
+            setSpentAtLocal(d.toISOString().slice(0, 16))
+          }
+          if (parsed.items && parsed.items.length > 0) {
+            setNotes(parsed.items.join(', '))
+          }
+
+          console.log('[App] Receipt processed:', parsed)
+        }
+      } catch (err) {
+        console.error('[App] processReceiptWithOCR error:', err)
+      } finally {
+        setIsProcessingReceipt(false)
       }
+    },
+    [session]
+  )
 
-      await trackActivity('receipt_scan_success', { merchant: parsed.merchant })
-    } catch (err) {
-      console.error('OCR failed:', err)
-      alert('Failed to process receipt')
-      await trackActivity('receipt_scan_failed')
-    } finally {
-      setIsProcessingReceipt(false)
-    }
-  }
-
+  // Helper: file to base64
   function fileToBase64(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader()
-      reader.onload = () => resolve(reader.result)
+      reader.onload = () => resolve(reader.result.split(',')[1])
       reader.onerror = reject
       reader.readAsDataURL(file)
     })
   }
 
-  async function addExpense() {
-    if (!amount || !merchant || !categoryId) {
-      alert('Amount, Merchant, and Category are required.')
-      return
-    }
+  // Helper: sanitize filename
+  function sanitizeFilename(name) {
+    return name.replace(/[^a-zA-Z0-9._-]/g, '_')
+  }
 
-    setIsSaving(true)
-    setSaveSuccess(false)
+  // ---------------------------------------------------------------------------
+  // Add expense
+  // ---------------------------------------------------------------------------
+  const addExpense = useCallback(
+    async (e) => {
+      e.preventDefault()
 
-    try {
-      let receiptImageUrl = null
-
-      if (receiptFile) {
-        const fileName = `${session.user.id}/${Date.now()}_${sanitizeFilename(receiptFile.name)}`
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('receipts')
-          .upload(fileName, receiptFile)
-
-        if (uploadError) throw uploadError
-
-        receiptImageUrl = uploadData.path
+      if (!merchant.trim() || !amount || !categoryId) {
+        alert('Please fill in merchant, amount, and category.')
+        return
       }
 
-      let locationString = null
-      if (navigator.geolocation) {
-        try {
+      const amountNum = parseFloat(amount)
+      if (isNaN(amountNum) || amountNum <= 0) {
+        alert('Amount must be a positive number.')
+        return
+      }
+
+      setIsSaving(true)
+      setSaveSuccess(false)
+
+      try {
+        const userId = session?.user?.id
+        if (!userId) throw new Error('No user ID')
+
+        // Upload receipt if present
+        let receiptImageUrl = null
+        if (receiptFile) {
+          const sanitized = sanitizeFilename(receiptFile.name)
+          const filePath = `${userId}/${Date.now()}_${sanitized}`
+          const { error: uploadError } = await supabase.storage
+            .from('receipts')
+            .upload(filePath, receiptFile)
+
+          if (uploadError) throw uploadError
+
+          const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(filePath)
+          receiptImageUrl = urlData?.publicUrl || null
+        }
+
+        // Get geolocation
+        let location = null
+        if (navigator.geolocation) {
           const pos = await new Promise((resolve, reject) => {
             navigator.geolocation.getCurrentPosition(resolve, reject)
           })
           const { latitude, longitude } = pos.coords
-          locationString = await getLocationString(latitude, longitude)
-        } catch (err) {
-          console.warn('Geolocation failed:', err)
+          location = await getLocationString(latitude, longitude)
         }
+
+        // Parse tags
+        const tags = tagsText
+          .split(',')
+          .map((t) => t.trim())
+          .filter((t) => t)
+
+        // Insert expense
+        const { error: insertError } = await supabase.from('expenses').insert({
+          user_id: userId,
+          category_id: categoryId,
+          merchant: merchant.trim(),
+          amount: amountNum,
+          payment_method: paymentMethod,
+          spent_at: new Date(spentAtLocal).toISOString(),
+          status,
+          notes: notes.trim() || null,
+          tax_deductible: isTaxDeductible,
+          reimbursable: isReimbursable,
+          employer_or_client: employerOrClient.trim() || null,
+          tags: tags.length > 0 ? tags : null,
+          location: location || null,
+          receipt_image_url: receiptImageUrl,
+        })
+
+        if (insertError) throw insertError
+
+        // Reset form
+        setMerchant('')
+        setAmount('')
+        setCategoryId('')
+        setPaymentMethod('card')
+        setSpentAtLocal(getNowLocalDateTime())
+        setStatus('cleared')
+        setNotes('')
+        setIsTaxDeductible(false)
+        setIsReimbursable(false)
+        setEmployerOrClient('')
+        setTagsText('')
+        setReceiptFile(null)
+        setReceiptUrls([])
+        setShowMoreOptions(false)
+
+        setSaveSuccess(true)
+        setTimeout(() => setSaveSuccess(false), 3000)
+
+        // Reload expenses
+        await loadExpenses(userId)
+      } catch (err) {
+        console.error('[App] addExpense error:', err)
+        alert('Failed to add expense.')
+      } finally {
+        setIsSaving(false)
       }
+    },
+    [
+      merchant,
+      amount,
+      categoryId,
+      paymentMethod,
+      spentAtLocal,
+      status,
+      notes,
+      isTaxDeductible,
+      isReimbursable,
+      employerOrClient,
+      tagsText,
+      receiptFile,
+      session,
+      loadExpenses,
+    ]
+  )
 
-      const tags = parseTags(tagsText)
-
-      const { error } = await supabase.from('expenses').insert({
-        user_id: session.user.id,
-        category_id: categoryId,
-        merchant,
-        amount: parseFloat(amount),
-        payment_method: paymentMethod,
-        spent_at: new Date(spentAtLocal).toISOString(),
-        status,
-        notes,
-        is_tax_deductible: isTaxDeductible,
-        is_reimbursable: isReimbursable,
-        employer_or_client: employerOrClient || null,
-        tags,
-        location: locationString,
-        receipt_image_url: receiptImageUrl
-      })
-
-      if (error) throw error
-
-      setSaveSuccess(true)
-      await trackActivity('expense_added', { merchant, amount: parseFloat(amount) })
-
-      setTimeout(() => setSaveSuccess(false), 2000)
-
-      setAmount('')
-      setMerchant('')
-      setCategoryId('')
-      setPaymentMethod('credit_card')
-      setSpentAtLocal(getNowLocalDateTime())
-      setStatus('settled')
-      setNotes('')
-      setIsTaxDeductible(false)
-      setIsReimbursable(false)
-      setEmployerOrClient('')
-      setTagsText('')
-      setReceiptFile(null)
-      setReceiptUrls([])
-
-      await loadExpenses()
-    } catch (err) {
-      console.error('Failed to add expense:', err)
-      alert('Failed to add expense')
-      await trackActivity('expense_add_failed')
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  function parseTags(text) {
-    if (!text) return []
-    return text
-      .split(',')
-      .map((t) => t.trim())
-      .filter((t) => t)
-  }
-
+  // Helper: reverse geocode location
   async function getLocationString(lat, lon) {
     try {
       const res = await fetch(
         `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`
       )
-      const json = await res.json()
-      return json.display_name || `${lat},${lon}`
+      const data = await res.json()
+      return data?.display_name || null
     } catch (err) {
-      console.warn('Reverse geocode failed:', err)
-      return `${lat},${lon}`
+      console.error('[App] getLocationString error:', err)
+      return null
     }
   }
 
-  function sanitizeFilename(name) {
-    return name.replace(/[^a-zA-Z0-9._-]/g, '_')
-  }
+  // ---------------------------------------------------------------------------
+  // Update expense
+  // ---------------------------------------------------------------------------
+  const updateExpense = useCallback(
+    async (id, updates) => {
+      try {
+        const { error } = await supabase.from('expenses').update(updates).eq('id', id)
 
-  function getNowLocalDateTime() {
-    const now = new Date()
-    const offset = now.getTimezoneOffset() * 60000
-    const localISO = new Date(now - offset).toISOString().slice(0, 16)
-    return localISO
-  }
+        if (error) throw error
 
-  async function updateExpense(id, updates) {
-    const { error } = await supabase.from('expenses').update(updates).eq('id', id)
-    if (!error) {
-      await loadExpenses()
-      await trackActivity('expense_updated', { id, updates })
-    }
-  }
-
-  async function setArchivedForExpense(id, archived) {
-    await updateExpense(id, { archived })
-    await trackActivity('expense_archived', { id, archived })
-  }
-
-  function archiveWithUndo(id) {
-    setArchivedForExpense(id, true)
-    setUndoBanner({
-      id,
-      message: 'Expense archived',
-      undo: () => {
-        setArchivedForExpense(id, false)
-        setUndoBanner(null)
+        await loadExpenses(session?.user?.id)
+      } catch (err) {
+        console.error('[App] updateExpense error:', err)
       }
-    })
-    setTimeout(() => setUndoBanner(null), 5000)
-  }
+    },
+    [session, loadExpenses]
+  )
 
-  async function deleteExpense(id) {
-    const { error } = await supabase.from('expenses').delete().eq('id', id)
-    if (!error) {
-      await loadExpenses()
-      await trackActivity('expense_deleted', { id })
+  // ---------------------------------------------------------------------------
+  // Archive expense (soft delete)
+  // ---------------------------------------------------------------------------
+  const setArchivedForExpense = useCallback(
+    async (id, archived) => {
+      try {
+        const { error } = await supabase.from('expenses').update({ archived }).eq('id', id)
+
+        if (error) throw error
+
+        await loadExpenses(session?.user?.id)
+      } catch (err) {
+        console.error('[App] setArchivedForExpense error:', err)
+      }
+    },
+    [session, loadExpenses]
+  )
+
+  // Archive with undo banner
+  const archiveWithUndo = useCallback(
+    async (id) => {
+      const expense = expenses.find((e) => e.id === id)
+      if (!expense) return
+
+      await setArchivedForExpense(id, true)
+
+      setUndoBanner({
+        message: `Archived "${expense.merchant}"`,
+        undo: async () => {
+          await setArchivedForExpense(id, false)
+          setUndoBanner(null)
+        },
+      })
+
+      setTimeout(() => setUndoBanner(null), 5000)
+    },
+    [expenses, setArchivedForExpense]
+  )
+
+  // ---------------------------------------------------------------------------
+  // Delete expense
+  // ---------------------------------------------------------------------------
+  const deleteExpense = useCallback(
+    async (id) => {
+      if (!window.confirm('Permanently delete this expense?')) return
+
+      try {
+        const { error } = await supabase.from('expenses').delete().eq('id', id)
+
+        if (error) throw error
+
+        await loadExpenses(session?.user?.id)
+      } catch (err) {
+        console.error('[App] deleteExpense error:', err)
+      }
+    },
+    [session, loadExpenses]
+  )
+
+  // ---------------------------------------------------------------------------
+  // Open receipt image
+  // ---------------------------------------------------------------------------
+  const openReceipt = useCallback(async (receiptImageUrl) => {
+    try {
+      window.open(receiptImageUrl, '_blank')
+    } catch (err) {
+      console.error('[App] openReceipt error:', err)
     }
-  }
+  }, [])
 
-  async function openReceipt(receiptPath) {
-    const { data } = await supabase.storage.from('receipts').createSignedUrl(receiptPath, 60 * 10)
-    if (data?.signedUrl) {
-      window.open(data.signedUrl, '_blank')
-    }
-  }
-
-  function exportCsv() {
-    if (!expenses.length) {
-      alert('No expenses to export')
+  // ---------------------------------------------------------------------------
+  // Export CSV
+  // ---------------------------------------------------------------------------
+  const exportCsv = useCallback(() => {
+    if (allExpenses.length === 0) {
+      alert('No expenses to export.')
       return
     }
 
     const headers = [
       'Date',
       'Merchant',
-      'Amount',
       'Category',
+      'Amount',
       'Payment Method',
       'Status',
       'Notes',
-      'Tax Deductible',
-      'Reimbursable',
-      'Employer/Client',
-      'Tags',
-      'Location'
     ]
 
-    const rows = expenses.map((exp) => {
-      const cat = categories.find((c) => c.id === exp.category_id)
+    const rows = allExpenses.map((e) => {
+      const cat = categories.find((c) => c.id === e.category_id)
       return [
-        exp.spent_at,
-        csvEscape(exp.merchant),
-        exp.amount,
-        csvEscape(cat?.name || ''),
-        exp.payment_method,
-        exp.status,
-        csvEscape(exp.notes),
-        exp.is_tax_deductible ? 'Yes' : 'No',
-        exp.is_reimbursable ? 'Yes' : 'No',
-        csvEscape(exp.employer_or_client),
-        csvEscape((exp.tags || []).join(', ')),
-        csvEscape(exp.location)
+        e.spent_at ? new Date(e.spent_at).toLocaleDateString() : '',
+        e.merchant || '',
+        cat?.name || '',
+        e.amount || 0,
+        e.payment_method || '',
+        e.status || '',
+        e.notes || '',
       ]
     })
 
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
-      [headers.join(','), ...rows.map((r) => r.join(','))].join('\n')
+    const csvContent = [headers, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n')
 
-    const encodedUri = encodeURI(csvContent)
-    const link = document.createElement('a')
-    link.setAttribute('href', encodedUri)
-    link.setAttribute('download', 'expenses.csv')
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-
-    trackActivity('csv_exported')
-  }
+    const blob = new Blob([csvContent], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `expenses_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [allExpenses, categories])
 
   function csvEscape(val) {
-    if (!val) return ''
+    if (val == null) return ''
     const str = String(val)
     if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-      return '"' + str.replace(/"/g, '""') + '"'
+      return `"${str.replace(/"/g, '""')}"`
     }
     return str
   }
 
-  async function addCategory() {
-    if (!newCategoryName.trim()) {
-      alert('Category name is required')
-      return
-    }
-
-    const { error } = await supabase.from('categories').insert({
-      name: newCategoryName.trim(),
-      icon: '📂',
-      color: '#3b82f6'
-    })
-
-    if (!error) {
-      setNewCategoryName('')
-      setShowAddCategory(false)
-      await loadCategories()
-      await trackActivity('category_added', { name: newCategoryName })
-    }
-  }
-
-  function handleTransactionsParsed(transactions) {
+  // ---------------------------------------------------------------------------
+  // Import flow
+  // ---------------------------------------------------------------------------
+  const handleTransactionsParsed = useCallback((transactions) => {
     setImportedTransactions(transactions)
+  }, [])
+
+  const handleImport = useCallback(
+    async (finalTransactions) => {
+      try {
+        const userId = session?.user?.id
+        if (!userId) throw new Error('No user ID')
+
+        const rows = finalTransactions.map((t) => ({
+          user_id: userId,
+          category_id: t.category_id,
+          merchant: t.merchant,
+          amount: t.amount,
+          payment_method: t.payment_method || 'card',
+          spent_at: t.spent_at ? new Date(t.spent_at).toISOString() : new Date().toISOString(),
+          status: t.status || 'cleared',
+          notes: t.notes || null,
+        }))
+
+        const { error } = await supabase.from('expenses').insert(rows)
+
+        if (error) throw error
+
+        alert(`Imported ${rows.length} expenses.`)
+        setShowImport(false)
+        setImportedTransactions([])
+
+        await loadExpenses(userId)
+      } catch (err) {
+        console.error('[App] handleImport error:', err)
+        alert('Failed to import expenses.')
+      }
+    },
+    [session, loadExpenses]
+  )
+
+  const handleCancelImport = useCallback(() => {
     setShowImport(false)
-  }
-
-  async function handleImport(finalTransactions) {
-    const toInsert = finalTransactions.map((t) => ({
-      user_id: session.user.id,
-      category_id: t.category_id,
-      merchant: t.merchant,
-      amount: parseFloat(t.amount),
-      payment_method: t.payment_method || 'credit_card',
-      spent_at: t.spent_at,
-      status: t.status || 'settled',
-      notes: t.notes || ''
-    }))
-
-    const { error } = await supabase.from('expenses').insert(toInsert)
-    if (error) {
-      console.error('Import failed:', error)
-      alert('Import failed')
-      await trackActivity('import_failed')
-    } else {
-      alert('Import successful!')
-      await trackActivity('import_success', { count: toInsert.length })
-      await loadExpenses()
-      setImportedTransactions([])
-    }
-  }
-
-  function handleCancelImport() {
     setImportedTransactions([])
-  }
+  }, [])
 
-  useEffect(() => {
-    if (receiptFile) {
-      const objectUrl = URL.createObjectURL(receiptFile)
-      setReceiptUrls([objectUrl])
-      return () => URL.revokeObjectURL(objectUrl)
-    } else {
-      setReceiptUrls([])
-    }
-  }, [receiptFile])
+  // ---------------------------------------------------------------------------
+  // Handle login (for Login component)
+  // ---------------------------------------------------------------------------
+  const handleLogin = useCallback(
+    (session) => {
+      setSession(session)
+    },
+    []
+  )
 
-  async function handleLogin(email, password) {
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      })
-      if (error) throw error
-    } catch (err) {
-      alert('Login failed: ' + err.message)
-    }
-  }
-
-  async function handleLogout() {
-    await trackActivity('logout')
-    await supabase.auth.signOut()
-  }
-
+  // ---------------------------------------------------------------------------
+  // Render: not logged in
+  // ---------------------------------------------------------------------------
   if (!session) {
-    return <Login onLogin={handleLogin} />
-  }
-
-  if (showLoginHistory) {
-    return <LoginHistory onBack={() => setShowLoginHistory(false)} />
-  }
-
-  if (showAnalytics) {
-    return <AnalyticsDashboard onBack={() => setShowAnalytics(false)} />
-  }
-
-  if (showImport) {
     return (
-      <FileImport
-        categories={categories}
-        onTransactionsParsed={handleTransactionsParsed}
-        onClose={() => setShowImport(false)}
-      />
+      <div style={{ padding: 40, textAlign: 'center' }}>
+        <h1>Nova Expense Tracker</h1>
+        <Login onLogin={handleLogin} />
+      </div>
     )
   }
 
-  if (importedTransactions.length > 0) {
-    return (
-      <ImportPreview
-        transactions={importedTransactions}
-        categories={categories}
-        onConfirm={handleImport}
-        onCancel={handleCancelImport}
-      />
-    )
-  }
-
+  // ---------------------------------------------------------------------------
+  // Render: logged in
+  // ---------------------------------------------------------------------------
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: 20, fontFamily: 'sans-serif' }}>
-      {showPaywall && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0,0,0,0.7)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999
-          }}
-        >
-          <div
-            style={{
-              background: '#fff',
-              padding: 30,
-              borderRadius: 8,
-              maxWidth: 400,
-              textAlign: 'center'
-            }}
-          >
-            <h2>✨ Upgrade to PRO</h2>
-            <p>Unlock advanced AI features, analytics, and unlimited expenses.</p>
-            <button
-              onClick={() => {
-                trackActivity('upgrade_clicked')
-                alert('Redirecting to Stripe checkout...')
-              }}
-              style={{
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                color: '#fff',
-                border: 'none',
-                padding: '12px 24px',
-                borderRadius: 8,
-                cursor: 'pointer',
-                fontSize: 16,
-                marginRight: 10
-              }}
-            >
-              Upgrade Now
-            </button>
-            <button
-              onClick={() => setShowPaywall(false)}
-              style={{
-                background: '#eee',
-                border: 'none',
-                padding: '12px 24px',
-                borderRadius: 8,
-                cursor: 'pointer',
-                fontSize: 16
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Header */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 20,
+        }}
+      >
+        <h1 style={{ margin: 0 }}>Nova Expense Tracker</h1>
 
-      <header style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ margin: 0 }}>💰 Nova Expense Tracker</h1>
-        
-        <div style={{ textAlign: 'center', flex: 1 }}>
-          <div style={{ fontSize: 18, fontWeight: 'bold', color: '#333' }}>
-            Hello {userName}
+        {/* User greeting (centered) */}
+        {userName && (
+          <div style={{ textAlign: 'center', flex: 1 }}>
+            <div style={{ fontSize: 18, fontWeight: 'bold' }}>Hello {userName}</div>
+            {userTitle && <div style={{ fontSize: 14, color: '#666' }}>{userTitle}</div>}
           </div>
-          {userTitle && (
-            <div style={{ fontSize: 14, color: '#666', marginTop: 4 }}>
-              {userTitle}
-            </div>
-          )}
-        </div>
+        )}
 
-        <div style={{ display: 'flex', gap: 10 }}>
-          {subscriptionStatus === 'pro' && (
-            <button
-              onClick={() => setTestMode(!testMode)}
-              style={{
-                background: testMode ? '#f59e0b' : '#10b981',
-                color: '#fff',
-                border: 'none',
-                padding: '8px 16px',
-                borderRadius: 8,
-                cursor: 'pointer',
-                fontSize: 12
-              }}
-            >
-              {testMode ? '🧪 Basic Mode' : '✨ PRO Mode'}
-            </button>
-          )}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {/* Test mode toggle for admins */}
           {isAdmin && (
-            <>
-              <button
-                onClick={() => {
-                  setShowLoginHistory(true)
-                  setShowAnalytics(false)
-                }}
-                style={{
-                  background: '#3b82f6',
-                  color: '#fff',
-                  border: 'none',
-                  padding: '8px 16px',
-                  borderRadius: 8,
-                  cursor: 'pointer'
-                }}
-              >
-                🔐 Login History
-              </button>
-              <button
-                onClick={() => {
-                  setShowAnalytics(true)
-                  setShowLoginHistory(false)
-                }}
-                style={{
-                  background: '#10b981',
-                  color: '#fff',
-                  border: 'none',
-                  padding: '8px 16px',
-                  borderRadius: 8,
-                  cursor: 'pointer'
-                }}
-              >
-                📊 Analytics
-              </button>
-            </>
+            <button
+              onClick={() => setTestMode((prev) => !prev)}
+              style={{
+                padding: '8px 12px',
+                background: testMode ? '#fbbf24' : '#10b981',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 6,
+                cursor: 'pointer',
+              }}
+            >
+              {testMode ? 'Test Mode (Basic)' : 'PRO Mode'}
+            </button>
           )}
+
+          {/* Admin actions: Login History (admins only) */}
+          {isAdmin && (
+            <button
+              onClick={() => setShowLoginHistory((prev) => !prev)}
+              style={{
+                padding: '8px 12px',
+                background: '#3b82f6',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 6,
+                cursor: 'pointer',
+              }}
+            >
+              Login History
+            </button>
+          )}
+
+          {/* Admin actions: Analytics (admins only) */}
+          {isAdmin && (
+            <button
+              onClick={() => setShowAnalytics((prev) => !prev)}
+              style={{
+                padding: '8px 12px',
+                background: '#10b981',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 6,
+                cursor: 'pointer',
+              }}
+            >
+              Analytics
+            </button>
+          )}
+
+          {/* Import */}
           <button
-            onClick={() => setShowImport(true)}
+            onClick={() => setShowImport((prev) => !prev)}
             style={{
-              background: '#10b981',
+              padding: '8px 12px',
+              background: '#8b5cf6',
               color: '#fff',
               border: 'none',
-              padding: '8px 16px',
-              borderRadius: 8,
-              cursor: 'pointer'
+              borderRadius: 6,
+              cursor: 'pointer',
             }}
           >
-            📥 Import
+            Import
           </button>
+
+          {/* Export */}
           <button
-            onClick={handleLogout}
+            onClick={exportCsv}
             style={{
+              padding: '8px 12px',
+              background: '#06b6d4',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+            }}
+          >
+            Export CSV
+          </button>
+
+          {/* Logout */}
+          <button
+            onClick={async () => {
+              await supabase.auth.signOut()
+              setSession(null)
+            }}
+            style={{
+              padding: '8px 12px',
               background: '#ef4444',
               color: '#fff',
               border: 'none',
-              padding: '8px 16px',
-              borderRadius: 8,
-              cursor: 'pointer'
+              borderRadius: 6,
+              cursor: 'pointer',
             }}
           >
             Logout
           </button>
         </div>
-      </header>
+      </div>
 
+      {/* Undo banner */}
       {undoBanner && (
         <div
           style={{
@@ -1238,7 +1229,7 @@ function App() {
             marginBottom: 20,
             display: 'flex',
             justifyContent: 'space-between',
-            alignItems: 'center'
+            alignItems: 'center',
           }}
         >
           <span>{undoBanner.message}</span>
@@ -1249,7 +1240,7 @@ function App() {
               border: 'none',
               padding: '6px 12px',
               borderRadius: 6,
-              cursor: 'pointer'
+              cursor: 'pointer',
             }}
           >
             Undo
@@ -1257,17 +1248,19 @@ function App() {
         </div>
       )}
 
+      {/* Nova ChatAssistant - NOW VISIBLE TO ALL USERS */}
       <div style={{ marginBottom: 20 }}>
         <ChatAssistant
           userId={session.user.id}
           expenses={allExpenses}
           categories={categories}
           onCommand={handleAICommand}
-          notifications={notifications}
+          notifications={[]} // Empty for PRO users - no spam
           isProMode={isProMode}
         />
       </div>
 
+      {/* AI Insights (PRO only) */}
       {isProMode && aiInsights && (
         <div
           style={{
@@ -1275,49 +1268,55 @@ function App() {
             color: '#fff',
             padding: 20,
             borderRadius: 12,
-            marginBottom: 20
+            marginBottom: 20,
           }}
         >
-          <h3 style={{ margin: '0 0 10px 0' }}>✨ AI Insights</h3>
-          <p style={{ margin: '5px 0' }}>
-            📈 Forecast: ${aiInsights.forecastTotal.toFixed(2)} this month
-          </p>
-          <p style={{ margin: '5px 0' }}>
-            🔁 Recurring: {aiInsights.recurringExpenses.join(', ') || 'None detected'}
-          </p>
-          <p style={{ margin: '5px 0' }}>
-            🏆 Top Categories:{' '}
-            {aiInsights.categorySpending.map((c) => `${c.name} ($${c.spent.toFixed(2)})`).join(', ')}
-          </p>
+          <h3 style={{ margin: '0 0 10px 0' }}>AI Insights (PRO)</h3>
+          <div>
+            <strong>Forecast This Month:</strong> ${aiInsights.forecastTotal.toFixed(2)}
+          </div>
+          {aiInsights.recurringExpenses.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <strong>Recurring Merchants:</strong> {aiInsights.recurringExpenses.join(', ')}
+            </div>
+          )}
+          {aiInsights.categorySpending.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <strong>Top Categories:</strong>
+              <ul style={{ margin: '4px 0 0 20px', padding: 0 }}>
+                {aiInsights.categorySpending.map((c) => (
+                  <li key={c.name}>
+                    {c.name}: ${c.spent.toFixed(2)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
+      {/* Upgrade banner (free users only) */}
       {!isProMode && (
         <div
           style={{
-            background: '#f59e0b',
-            color: '#000',
-            padding: 15,
+            background: '#fef3c7',
+            padding: 16,
             borderRadius: 8,
             marginBottom: 20,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center'
+            textAlign: 'center',
           }}
         >
-          <span>🚀 Upgrade to PRO for AI insights & advanced features</span>
+          <strong>Upgrade to PRO</strong> for AI insights, forecasts, and more!
           <button
-            onClick={() => {
-              trackActivity('stripe_checkout_initiated')
-              setShowPaywall(true)
-            }}
+            onClick={() => setShowPaywall(true)}
             style={{
-              background: '#fff',
-              border: 'none',
+              marginLeft: 12,
               padding: '8px 16px',
-              borderRadius: 8,
+              background: '#10b981',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
               cursor: 'pointer',
-              fontWeight: 'bold'
             }}
           >
             Upgrade
@@ -1325,6 +1324,111 @@ function App() {
         </div>
       )}
 
+      {/* Paywall modal */}
+      {showPaywall && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              background: '#fff',
+              padding: 40,
+              borderRadius: 12,
+              maxWidth: 400,
+              textAlign: 'center',
+            }}
+          >
+            <h2>Upgrade to PRO</h2>
+            <p>Unlock AI insights, forecasting, and advanced analytics.</p>
+            <button
+              onClick={() => {
+                console.log('[App] Stripe checkout initiated')
+                alert('Stripe checkout would open here.')
+                setShowPaywall(false)
+              }}
+              style={{
+                padding: '12px 24px',
+                background: '#10b981',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontSize: 16,
+              }}
+            >
+              Upgrade Now
+            </button>
+            <button
+              onClick={() => setShowPaywall(false)}
+              style={{
+                marginTop: 12,
+                padding: '8px 16px',
+                background: '#e5e7eb',
+                border: 'none',
+                borderRadius: 6,
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Login History (admins only) */}
+      {showLoginHistory && isAdmin && (
+        <div style={{ marginBottom: 20 }}>
+          <h3>Login History</h3>
+          {/* Placeholder - replace with actual component */}
+          <div
+            style={{
+              padding: 20,
+              background: '#f3f4f6',
+              borderRadius: 8,
+            }}
+          >
+            Login history will appear here.
+          </div>
+        </div>
+      )}
+
+      {/* Analytics Dashboard (admins only) */}
+      {showAnalytics && isAdmin && (
+        <div style={{ marginBottom: 20 }}>
+          <AnalyticsDashboard />
+        </div>
+      )}
+
+      {/* Import flow */}
+      {showImport && importedTransactions.length === 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <FileImport onTransactionsParsed={handleTransactionsParsed} />
+        </div>
+      )}
+
+      {showImport && importedTransactions.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <ImportPreview
+            transactions={importedTransactions}
+            categories={categories}
+            onImport={handleImport}
+            onCancel={handleCancelImport}
+          />
+        </div>
+      )}
+
+      {/* Add expense form */}
       <AddExpenseForm
         categories={categories}
         amount={amount}
@@ -1339,15 +1443,10 @@ function App() {
         setSpentAtLocal={setSpentAtLocal}
         status={status}
         setStatus={setStatus}
-        isSaving={isSaving}
-        saveSuccess={saveSuccess}
-        addExpense={addExpense}
-        showMoreOptions={showMoreOptions}
-        setShowMoreOptions={setShowMoreOptions}
-        isTaxDeductible={isTaxDeductible}
-        setIsTaxDeductible={setIsTaxDeductible}
         notes={notes}
         setNotes={setNotes}
+        isTaxDeductible={isTaxDeductible}
+        setIsTaxDeductible={setIsTaxDeductible}
         isReimbursable={isReimbursable}
         setIsReimbursable={setIsReimbursable}
         employerOrClient={employerOrClient}
@@ -1359,97 +1458,18 @@ function App() {
         receiptUrls={receiptUrls}
         isProcessingReceipt={isProcessingReceipt}
         processReceiptWithOCR={processReceiptWithOCR}
+        showMoreOptions={showMoreOptions}
+        setShowMoreOptions={setShowMoreOptions}
+        isSaving={isSaving}
+        saveSuccess={saveSuccess}
+        addExpense={addExpense}
+        isProMode={isProMode}
       />
 
-      <div style={{ display: 'flex', gap: 20, marginBottom: 20 }}>
-        <button
-          onClick={() => {
-            setShowAddCategory(!showAddCategory)
-          }}
-          style={{
-            background: '#8b5cf6',
-            color: '#fff',
-            border: 'none',
-            padding: '10px 20px',
-            borderRadius: 8,
-            cursor: 'pointer',
-            fontSize: 14
-          }}
-        >
-          {showAddCategory ? 'Cancel' : '➕ Add Category'}
-        </button>
-        <button
-          onClick={exportCsv}
-          style={{
-            background: '#06b6d4',
-            color: '#fff',
-            border: 'none',
-            padding: '10px 20px',
-            borderRadius: 8,
-            cursor: 'pointer',
-            fontSize: 14
-          }}
-        >
-          📥 Export CSV
-        </button>
-      </div>
+      {/* Monthly Summary */}
+      <MonthlySummary expenses={allExpenses} categories={categories} />
 
-      {showAddCategory && (
-        <div style={{ marginBottom: 20 }}>
-          <input
-            type="text"
-            placeholder="New category name"
-            value={newCategoryName}
-            onChange={(e) => setNewCategoryName(e.target.value)}
-            style={{
-              width: 200,
-              padding: 8,
-              borderRadius: 8,
-              border: '1px solid #ccc',
-              marginRight: 10
-            }}
-          />
-          <button
-            onClick={addCategory}
-            style={{
-              background: '#10b981',
-              color: '#fff',
-              border: 'none',
-              padding: '8px 16px',
-              borderRadius: 8,
-              cursor: 'pointer'
-            }}
-          >
-            Save
-          </button>
-        </div>
-      )}
-
-      <div style={{ marginBottom: 20 }}>
-        <input
-          type="text"
-          placeholder="Search expenses..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{
-            width: '100%',
-            padding: 10,
-            borderRadius: 8,
-            border: '1px solid #ccc',
-            fontSize: 14
-          }}
-        />
-        <label style={{ display: 'flex', alignItems: 'center', marginTop: 10 }}>
-          <input
-            type="checkbox"
-            checked={showArchived}
-            onChange={(e) => setShowArchived(e.target.checked)}
-            style={{ marginRight: 8 }}
-          />
-          Show archived
-        </label>
-      </div>
-
+      {/* Expense list */}
       <ExpenseList
         expenses={expenses}
         categories={categories}
@@ -1458,8 +1478,6 @@ function App() {
         deleteExpense={deleteExpense}
         openReceipt={openReceipt}
       />
-
-      <MonthlySummary expenses={allExpenses} categories={categories} />
     </div>
   )
 }
