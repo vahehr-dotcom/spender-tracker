@@ -1429,6 +1429,7 @@ function App() {
 
       {isProMode && (
         <ChatAssistant
+          userId={session.user.id}
           expenses={allExpenses}
           categories={categories}
           onCommand={handleAICommand}
