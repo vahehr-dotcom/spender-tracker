@@ -252,7 +252,7 @@ function App() {
       const { data } = await supabase
         .from('user_preferences')
         .select('role')
-        .eq('user_id', userId)
+        .eq('id', userId)
         .maybeSingle()
 
       if (data?.role) {
@@ -268,7 +268,7 @@ function App() {
       const { data } = await supabase
         .from('user_preferences')
         .select('display_name, title')
-        .eq('user_id', userId)
+        .eq('id', userId)
         .maybeSingle()
 
       if (data) {
@@ -288,9 +288,9 @@ function App() {
         .eq('user_id', userId)
         .maybeSingle()
 
-      // Auto-PRO for CEO and testers (you can list emails or roles here)
+      // Auto-PRO for CEO and testers
       const ceoEmail = 'lifeliftusa@gmail.com'
-      const testEmails = ['tester1@example.com', 'tester2@example.com'] // add your test emails
+      const testEmails = ['tester1@example.com', 'tester2@example.com']
       const userEmail = session?.user?.email
 
       if (userEmail === ceoEmail || testEmails.includes(userEmail)) {
@@ -454,11 +454,6 @@ function App() {
       calculateAIInsights()
     }
   }, [isProMode, allExpenses, categories, calculateAIInsights])
-
-  // ---------------------------------------------------------------------------
-  // Proactive notifications (Pro feature) - DISABLED FOR PRO USERS
-  // ---------------------------------------------------------------------------
-  // Removed notification fetching for PRO users - they get empty array
 
   // ---------------------------------------------------------------------------
   // AI command handler (Nova)
@@ -1255,7 +1250,7 @@ If any field is missing, use null.`
           expenses={allExpenses}
           categories={categories}
           onCommand={handleAICommand}
-          notifications={[]} // Empty for PRO users - no spam
+          notifications={[]}
           isProMode={isProMode}
         />
       </div>
@@ -1390,7 +1385,6 @@ If any field is missing, use null.`
       {showLoginHistory && isAdmin && (
         <div style={{ marginBottom: 20 }}>
           <h3>Login History</h3>
-          {/* Placeholder - replace with actual component */}
           <div
             style={{
               padding: 20,
