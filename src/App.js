@@ -29,6 +29,7 @@ function App() {
   const [showLoginHistory, setShowLoginHistory] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [loginStatus, setLoginStatus] = useState('');
   const sessionIdRef = useRef(null);
   const intervalRef = useRef(null);
   const sessionStartRef = useRef(null);
@@ -297,6 +298,24 @@ function App() {
     } catch (error) {
       console.error('Error suggesting category:', error);
       return 'Other';
+    }
+  };
+
+  const handleLogin = async (email, password) => {
+    setLoginStatus('Logging in...');
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+      if (error) {
+        setLoginStatus(`Error: ${error.message}`);
+      } else {
+        setLoginStatus('Login successful!');
+        setSession(data.session);
+      }
+    } catch (error) {
+      setLoginStatus(`Error: ${error.message}`);
     }
   };
 
@@ -603,7 +622,7 @@ function App() {
   }
 
   if (!session) {
-    return <Login />;
+    return <Login onLogin={handleLogin} status={loginStatus} />;
   }
 
   const isAdmin = userRole === 'admin' || session.user.email === 'lifeliftusa@gmail.com';
