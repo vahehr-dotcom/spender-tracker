@@ -1,280 +1,213 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
+import { useNavigate } from 'react-router-dom';
 
-export default function LoginHistoryPage() {
+function LoginHistoryPage() {
   const navigate = useNavigate();
-  const [logs, setLogs] = useState([]);
+  const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterEmail, setFilterEmail] = useState('');
   const [timeRange, setTimeRange] = useState('all');
 
   useEffect(() => {
-    loadLogs();
-  }, [timeRange, filterEmail]);
+    fetchSessions();
+  }, [timeRange]);
 
-  const loadLogs = async () => {
-    setLoading(true);
+  const fetchSessions = async () => {
     try {
+      setLoading(true);
+
       let query = supabase
         .from('user_sessions')
-        .select('*, user_id')
+        .select('*')
         .order('session_start', { ascending: false });
 
       if (timeRange !== 'all') {
         const now = new Date();
-        let cutoff = new Date();
+        let cutoff;
         
-        if (timeRange === '24h') cutoff.setHours(now.getHours() - 24);
-        else if (timeRange === '7d') cutoff.setDate(now.getDate() - 7);
-        else if (timeRange === '30d') cutoff.setDate(now.getDate() - 30);
-
+        if (timeRange === '24h') {
+          cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        } else if (timeRange === '7d') {
+          cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        } else if (timeRange === '30d') {
+          cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        }
+        
         query = query.gte('session_start', cutoff.toISOString());
       }
 
-      const { data: sessions, error } = await query.limit(100);
+      query = query.limit(100);
+
+      const { data, error } = await query;
 
       if (error) throw error;
 
-      const sessionsWithEmail = await Promise.all(
-        (sessions || []).map(async (session) => {
-          try {
-            const { data: userData } = await supabase.auth.admin.getUserById(session.user_id);
-            return {
-              ...session,
-              email: userData?.user?.email || 'Unknown'
-            };
-          } catch {
-            return {
-              ...session,
-              email: 'Unknown'
-            };
-          }
-        })
-      );
-
-      if (filterEmail) {
-        const filtered = sessionsWithEmail.filter(s => 
-          s.email.toLowerCase().includes(filterEmail.toLowerCase())
-        );
-        setLogs(filtered);
-      } else {
-        setLogs(sessionsWithEmail);
-      }
-    } catch (err) {
-      console.error('Failed to load session logs:', err);
+      setSessions(data || []);
+    } catch (error) {
+      console.error('Fetch sessions error:', error);
     } finally {
       setLoading(false);
     }
   };
 
   const formatDate = (timestamp) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffMins = Math.floor(diffMs / 60000);
-    
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffDays < 7) return `${diffDays}d ago`;
-    
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined,
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    if (!timestamp) return 'N/A';
+    return new Date(timestamp).toLocaleString();
   };
 
   const formatDuration = (seconds) => {
-    if (!seconds || seconds < 0) return 'Active';
-    
+    if (!seconds) return 'Active';
     const hours = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    
-    if (hours > 0) return `${hours}h ${mins}m`;
-    if (mins > 0) return `${mins}m ${secs}s`;
-    return `${secs}s`;
-  };
-
-  const getDeviceIcon = (platform) => {
-    const p = platform?.toLowerCase() || '';
-    if (p.includes('win')) return '🖥️';
-    if (p.includes('mac')) return '💻';
-    if (p.includes('iphone') || p.includes('ipad')) return '📱';
-    if (p.includes('android')) return '📱';
-    if (p.includes('linux')) return '🐧';
-    return '💻';
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return `${hours}h ${minutes}m`;
   };
 
   const getDeviceName = (platform) => {
-    const p = platform?.toLowerCase() || '';
-    if (p.includes('win')) return 'Windows';
-    if (p.includes('mac')) return 'Mac';
-    if (p.includes('iphone')) return 'iPhone';
-    if (p.includes('ipad')) return 'iPad';
-    if (p.includes('android')) return 'Android';
-    if (p.includes('linux')) return 'Linux';
-    return 'Unknown';
+    if (!platform) return 'Unknown';
+    if (platform.includes('Win')) return 'Windows';
+    if (platform.includes('Mac')) return 'Mac';
+    if (platform.includes('Linux')) return 'Linux';
+    if (platform.includes('iPhone') || platform.includes('iPad')) return 'iOS';
+    if (platform.includes('Android')) return 'Android';
+    return platform;
   };
 
   const getBrowserName = (userAgent) => {
-    const ua = userAgent?.toLowerCase() || '';
-    if (ua.includes('chrome') && !ua.includes('edg')) return 'Chrome';
-    if (ua.includes('safari') && !ua.includes('chrome')) return 'Safari';
-    if (ua.includes('firefox')) return 'Firefox';
-    if (ua.includes('edg')) return 'Edge';
-    return 'Browser';
+    if (!userAgent) return 'Unknown';
+    if (userAgent.includes('Chrome')) return 'Chrome';
+    if (userAgent.includes('Firefox')) return 'Firefox';
+    if (userAgent.includes('Safari')) return 'Safari';
+    if (userAgent.includes('Edge')) return 'Edge';
+    return 'Unknown';
   };
 
+  const getDeviceIcon = (platform) => {
+    const device = getDeviceName(platform);
+    if (device === 'Windows' || device === 'Mac' || device === 'Linux') return '💻';
+    if (device === 'iOS' || device === 'Android') return '📱';
+    return '🖥️';
+  };
+
+  const filteredSessions = sessions.filter(log => 
+    !filterEmail || log.email?.toLowerCase().includes(filterEmail.toLowerCase())
+  );
+
   return (
-    <div style={{ padding: '20px', fontFamily: 'system-ui, sans-serif', maxWidth: 1400 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 }}>
-        <h1 style={{ margin: 0 }}>🔐 Login History</h1>
-        <button
-          onClick={() => navigate('/')}
+    <div style={{ padding: '20px', maxWidth: '1400px', margin: '0 auto' }}>
+      <button 
+        onClick={() => navigate('/')} 
+        style={{ 
+          marginBottom: '20px', 
+          padding: '10px 20px', 
+          cursor: 'pointer',
+          backgroundColor: '#007bff',
+          color: 'white',
+          border: 'none',
+          borderRadius: '4px'
+        }}
+      >
+        ← Back to Dashboard
+      </button>
+
+      <h1 style={{ marginBottom: '20px' }}>Login History</h1>
+
+      <div style={{ marginBottom: '20px', display: 'flex', gap: '15px', alignItems: 'center' }}>
+        <input
+          type="text"
+          placeholder="Filter by Email"
+          value={filterEmail}
+          onChange={(e) => setFilterEmail(e.target.value)}
           style={{
-            padding: '8px 16px',
-            background: '#666',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: 'bold'
+            padding: '8px 12px',
+            border: '1px solid #ddd',
+            borderRadius: '4px',
+            width: '250px'
+          }}
+        />
+
+        <select
+          value={timeRange}
+          onChange={(e) => setTimeRange(e.target.value)}
+          style={{
+            padding: '8px 12px',
+            border: '1px solid #ddd',
+            borderRadius: '4px'
           }}
         >
-          ← Back
-        </button>
-      </div>
+          <option value="all">All Time</option>
+          <option value="24h">Last 24 Hours</option>
+          <option value="7d">Last 7 Days</option>
+          <option value="30d">Last 30 Days</option>
+        </select>
 
-      <div style={{
-        background: '#f5f5f5',
-        padding: 20,
-        borderRadius: 8,
-        marginBottom: 20,
-        display: 'flex',
-        gap: 15,
-        flexWrap: 'wrap',
-        alignItems: 'center'
-      }}>
-        <div>
-          <label style={{ fontSize: 14, fontWeight: 'bold', marginRight: 8 }}>Filter by Email:</label>
-          <input
-            type="text"
-            value={filterEmail}
-            onChange={(e) => setFilterEmail(e.target.value)}
-            placeholder="Search email..."
-            style={{
-              padding: '8px 12px',
-              border: '1px solid #ddd',
-              borderRadius: 6,
-              fontSize: 14
-            }}
-          />
-        </div>
-
-        <div>
-          <label style={{ fontSize: 14, fontWeight: 'bold', marginRight: 8 }}>Time Range:</label>
-          <select
-            value={timeRange}
-            onChange={(e) => setTimeRange(e.target.value)}
-            style={{
-              padding: '8px 12px',
-              border: '1px solid #ddd',
-              borderRadius: 6,
-              fontSize: 14,
-              cursor: 'pointer'
-            }}
-          >
-            <option value="all">All Time</option>
-            <option value="24h">Last 24 Hours</option>
-            <option value="7d">Last 7 Days</option>
-            <option value="30d">Last 30 Days</option>
-          </select>
-        </div>
-
-        <button
-          onClick={loadLogs}
+        <button 
+          onClick={fetchSessions}
           style={{
             padding: '8px 16px',
-            background: '#4caf50',
+            backgroundColor: '#28a745',
             color: 'white',
             border: 'none',
-            borderRadius: 6,
-            cursor: 'pointer',
-            fontWeight: 'bold'
+            borderRadius: '4px',
+            cursor: 'pointer'
           }}
         >
-          🔄 Refresh
+          Refresh
         </button>
 
-        <div style={{ marginLeft: 'auto', fontSize: 14, color: '#666' }}>
-          <strong>{logs.length}</strong> session{logs.length !== 1 ? 's' : ''}
-        </div>
+        <span style={{ marginLeft: 'auto', color: '#666' }}>
+          {filteredSessions.length} session(s)
+        </span>
       </div>
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: 40, color: '#666' }}>
-          Loading session history...
+        <div style={{ textAlign: 'center', padding: '40px' }}>
+          <p>Loading session history...</p>
         </div>
-      ) : logs.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 40, color: '#666' }}>
-          No sessions found
+      ) : filteredSessions.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+          <p>No sessions found</p>
         </div>
       ) : (
-        <div style={{ background: 'white', borderRadius: 8, overflow: 'hidden', border: '1px solid #ddd' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            backgroundColor: 'white',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+          }}>
             <thead>
-              <tr style={{ background: '#f9f9f9', borderBottom: '2px solid #ddd' }}>
-                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Email</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Device</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Browser</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Timezone</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Login Time</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Duration</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Status</th>
+              <tr style={{ backgroundColor: '#f8f9fa', borderBottom: '2px solid #dee2e6' }}>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Email</th>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Device</th>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Browser</th>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Timezone</th>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Login Time</th>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Duration</th>
+                <th style={{ padding: '12px', textAlign: 'left' }}>Status</th>
               </tr>
             </thead>
             <tbody>
-              {logs.map((log, index) => (
-                <tr
-                  key={log.id}
-                  style={{
-                    borderBottom: index < logs.length - 1 ? '1px solid #eee' : 'none',
-                    background: index % 2 === 0 ? 'white' : '#fafafa'
-                  }}
-                >
-                  <td style={{ padding: '12px', fontWeight: '500' }}>
-                    {log.email}
-                  </td>
+              {filteredSessions.map((log) => (
+                <tr key={log.id} style={{ borderBottom: '1px solid #dee2e6' }}>
+                  <td style={{ padding: '12px' }}>{log.email || 'Unknown'}</td>
                   <td style={{ padding: '12px' }}>
                     {getDeviceIcon(log.device_info?.platform)} {getDeviceName(log.device_info?.platform)}
                   </td>
-                  <td style={{ padding: '12px', fontSize: 14, color: '#666' }}>
-                    {getBrowserName(log.device_info?.user_agent)}
-                  </td>
-                  <td style={{ padding: '12px', fontSize: 14, color: '#666' }}>
-                    {log.device_info?.timezone || 'Unknown'}
-                  </td>
-                  <td style={{ padding: '12px', fontSize: 14, color: '#666' }}>
-                    {formatDate(log.session_start)}
-                  </td>
-                  <td style={{ padding: '12px', fontSize: 14, fontWeight: 'bold' }}>
-                    {formatDuration(log.duration_seconds)}
-                  </td>
-                  <td style={{ padding: '12px', fontSize: 14 }}>
-                    {log.session_end ? (
-                      <span style={{ color: '#999' }}>○ Ended</span>
-                    ) : (
-                      <span style={{ color: '#4caf50', fontWeight: 'bold' }}>● Active</span>
-                    )}
+                  <td style={{ padding: '12px' }}>{getBrowserName(log.device_info?.user_agent)}</td>
+                  <td style={{ padding: '12px' }}>{log.device_info?.timezone || 'Unknown'}</td>
+                  <td style={{ padding: '12px' }}>{formatDate(log.session_start)}</td>
+                  <td style={{ padding: '12px' }}>{formatDuration(log.duration_seconds)}</td>
+                  <td style={{ padding: '12px' }}>
+                    <span style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      backgroundColor: log.session_end ? '#d4edda' : '#fff3cd',
+                      color: log.session_end ? '#155724' : '#856404'
+                    }}>
+                      {log.session_end ? 'Ended' : 'Active'}
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -285,3 +218,5 @@ export default function LoginHistoryPage() {
     </div>
   );
 }
+
+export default LoginHistoryPage;
