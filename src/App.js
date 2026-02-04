@@ -61,7 +61,7 @@ function MainApp() {
     return allExpenses.filter(expense => 
       expense.merchant?.toLowerCase().includes(term) ||
       expense.category?.toLowerCase().includes(term) ||
-      expense.notes?.toLowerCase().includes(term)
+      expense.note?.toLowerCase().includes(term)
     );
   }, [allExpenses, searchTerm]);
 
@@ -127,6 +127,7 @@ function MainApp() {
           .from('user_sessions')
           .insert({
             user_id: userId,
+            email: session?.user?.email || '',
             session_start: new Date().toISOString(),
             last_activity: new Date().toISOString(),
             device_info: {
@@ -198,12 +199,13 @@ function MainApp() {
     try {
       const { data, error } = await supabase
         .from('user_preferences')
-        .select('role')
+        .select('preferences_value')
         .eq('user_id', userId)
+        .eq('preferences_type', 'role')
         .maybeSingle();
 
       if (error) throw error;
-      setUserRole(data?.role || 'user');
+      setUserRole(data?.preferences_value || 'user');
     } catch (error) {
       console.error('Load role error:', error);
       setUserRole('user');
@@ -214,12 +216,18 @@ function MainApp() {
     try {
       const { data, error } = await supabase
         .from('user_preferences')
-        .select('display_name, title')
+        .select('preferences_type, preferences_value')
         .eq('user_id', userId)
-        .maybeSingle();
+        .in('preferences_type', ['display_name', 'title']);
 
       if (error) throw error;
-      setUserProfile(data);
+      
+      const profile = {};
+      data?.forEach(pref => {
+        profile[pref.preferences_type] = pref.preferences_value;
+      });
+      
+      setUserProfile(profile);
     } catch (error) {
       console.error('Load profile error:', error);
     }
@@ -267,17 +275,12 @@ function MainApp() {
         .from('expenses')
         .select('*')
         .eq('user_id', userId)
-        .order('expense_date', { ascending: false });
+        .order('spent_at', { ascending: false });
 
       if (error) throw error;
       
-      const normalizedExpenses = (data || []).map(expense => ({
-        ...expense,
-        spent_at: expense.expense_date || expense.spent_at
-      }));
-
-      setExpenses(normalizedExpenses);
-      updateMerchantMemory(normalizedExpenses);
+      setExpenses(data || []);
+      updateMerchantMemory(data || []);
     } catch (error) {
       console.error('Load expenses error:', error);
     }
@@ -408,11 +411,11 @@ function MainApp() {
         user_id: session.user.id,
         amount: parseFloat(expenseData.amount),
         merchant: expenseData.merchant,
-        category: expenseData.category,
-        expense_date: expenseData.date || new Date().toISOString(),
+        category_id: expenseData.category,
+        spent_at: expenseData.date || new Date().toISOString(),
         payment_method: expenseData.paymentMethod,
-        notes: expenseData.notes || '',
-        receipt_url: receiptUrl,
+        note: expenseData.notes || '',
+        receipt_image_url: receiptUrl,
         location: location,
         archived: false
       };
@@ -520,10 +523,10 @@ function MainApp() {
         user_id: session.user.id,
         amount: parseFloat(t.amount),
         merchant: t.merchant,
-        category: t.category,
-        expense_date: t.date,
+        category_id: t.category,
+        spent_at: t.date,
         payment_method: t.paymentMethod || 'Unknown',
-        notes: t.notes || '',
+        note: t.notes || '',
         archived: false
       }));
 
@@ -550,7 +553,7 @@ function MainApp() {
     try {
       const csvHeader = 'Date,Merchant,Category,Amount,Payment Method,Notes\n';
       const csvRows = filteredExpenses.map(e => 
-        `${e.expense_date || e.spent_at},${e.merchant},${e.category},${e.amount},${e.payment_method || ''},${e.notes || ''}`
+        `${e.spent_at},${e.merchant},${e.category},${e.amount},${e.payment_method || ''},${e.note || ''}`
       ).join('\n');
 
       const csvContent = csvHeader + csvRows;
@@ -675,7 +678,7 @@ function MainApp() {
     const currentYear = now.getFullYear();
 
     const thisMonthExpenses = expenses.filter(e => {
-      const expenseDate = new Date(e.expense_date || e.spent_at);
+      const expenseDate = new Date(e.spent_at);
       return expenseDate.getMonth() === currentMonth && 
              expenseDate.getFullYear() === currentYear &&
              !e.archived;
