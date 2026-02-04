@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 
-export default function AnalyticsDashboard({ onBack }) {
+export default function AnalyticsDashboard() {
   const [stats, setStats] = useState({
     totalUsers: 0,
     activeToday: 0,
@@ -217,36 +217,20 @@ export default function AnalyticsDashboard({ onBack }) {
     <div style={{ padding: '20px', fontFamily: 'system-ui, sans-serif', maxWidth: 1600 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 }}>
         <h1 style={{ margin: 0 }}>📊 Analytics Dashboard</h1>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button
-            onClick={loadAnalytics}
-            style={{
-              padding: '8px 16px',
-              background: '#4caf50',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 'bold'
-            }}
-          >
-            🔄 Refresh
-          </button>
-          <button
-            onClick={onBack}
-            style={{
-              padding: '8px 16px',
-              background: '#666',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 'bold'
-            }}
-          >
-            ← Back
-          </button>
-        </div>
+        <button
+          onClick={loadAnalytics}
+          style={{
+            padding: '8px 16px',
+            background: '#4caf50',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontWeight: 'bold'
+          }}
+        >
+          🔄 Refresh
+        </button>
       </div>
 
       {/* Key Metrics */}

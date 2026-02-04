@@ -18,7 +18,7 @@ function AnalyticsPage() {
   const navigate = useNavigate();
   return (
     <div style={{ padding: '20px' }}>
-      <button onClick={() => navigate('/')} style={{ marginBottom: '20px', padding: '10px 20px', cursor: 'pointer' }}>
+      <button onClick={() => navigate('/')} style={{ marginBottom: '20px', padding: '10px 20px', cursor: 'pointer', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px' }}>
         ← Back to Dashboard
       </button>
       <AnalyticsDashboard />
@@ -769,9 +769,9 @@ function MainApp() {
       </div>
 
       {userProfile && (
-        <p style={{ marginBottom: '20px', color: '#666' }}>
-          Welcome, {userProfile.display_name || session.user.email}
-          {userProfile.title && ` - ${userProfile.title}`}
+        <p style={{ marginBottom: '20px', fontSize: '18px', color: '#333' }}>
+          <strong>Hello, {userProfile.display_name || session.user.email}</strong>
+          {userProfile.title && <span style={{ color: '#666' }}> - {userProfile.title}</span>}
         </p>
       )}
 
@@ -796,6 +796,7 @@ function MainApp() {
         <div style={{ marginBottom: '20px', width: '100%' }}>
           <ChatAssistant 
             userId={session?.user?.id}
+            userProfile={userProfile}
             onCommand={handleAICommand}
             expenses={expenses}
           />

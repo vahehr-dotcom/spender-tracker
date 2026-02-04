@@ -9,6 +9,7 @@ export default function ChatAssistant({
   onUpgradeToPro,
   onAICommand,
   userId,
+  userProfile,
   notifications = [],
   onDismissNotification
 }) {
@@ -20,6 +21,7 @@ export default function ChatAssistant({
   const [voiceTranscript, setVoiceTranscript] = useState('')
   const [shouldAutoSubmit, setShouldAutoSubmit] = useState(false)
   const [isInitialized, setIsInitialized] = useState(false)
+  const [showGreeting, setShowGreeting] = useState(true)
 
   const recognitionRef = useRef(null)
   const audioRef = useRef(null)
@@ -36,6 +38,14 @@ export default function ChatAssistant({
   useEffect(() => {
     categoriesRef.current = categories
   }, [categories])
+
+  // Load greeting preference from localStorage
+  useEffect(() => {
+    const savedGreetingPref = localStorage.getItem('novaGreeting')
+    if (savedGreetingPref !== null) {
+      setShowGreeting(savedGreetingPref === 'true')
+    }
+  }, [])
 
   // Initialize Memory and Agent
   useEffect(() => {
@@ -129,6 +139,12 @@ export default function ChatAssistant({
       }
     }
   }, [])
+
+  const toggleGreeting = () => {
+    const newValue = !showGreeting
+    setShowGreeting(newValue)
+    localStorage.setItem('novaGreeting', newValue.toString())
+  }
 
   const startListening = () => {
     if (recognitionRef.current && !isListening) {
@@ -315,6 +331,7 @@ export default function ChatAssistant({
   }
 
   const nickname = memoryRef.current?.getNickname() || 'there'
+  const displayName = userProfile?.display_name || 'there'
 
   // Get notification icon
   const getNotificationIcon = (type) => {
@@ -377,9 +394,9 @@ export default function ChatAssistant({
           {isProMode && <span style={{ fontSize: 12, opacity: 0.9 }}>✨ Learning Mode • 💜 Emotionally Intelligent</span>}
         </h3>
         
-        {memoryRef.current && memoryRef.current.sessionMessages.length > 0 && (
+        <div style={{ display: 'flex', gap: 10 }}>
           <button
-            onClick={clearChat}
+            onClick={toggleGreeting}
             style={{
               padding: '6px 12px',
               fontSize: 12,
@@ -389,11 +406,46 @@ export default function ChatAssistant({
               borderRadius: 6,
               cursor: 'pointer'
             }}
+            title={showGreeting ? 'Hide greeting' : 'Show greeting'}
           >
-            Clear Chat
+            {showGreeting ? '👋 Hide Greeting' : '👋 Show Greeting'}
           </button>
-        )}
+          
+          {memoryRef.current && memoryRef.current.sessionMessages.length > 0 && (
+            <button
+              onClick={clearChat}
+              style={{
+                padding: '6px 12px',
+                fontSize: 12,
+                background: 'rgba(255,255,255,0.2)',
+                color: 'white',
+                border: '1px solid rgba(255,255,255,0.3)',
+                borderRadius: 6,
+                cursor: 'pointer'
+              }}
+            >
+              Clear Chat
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Nova Greeting */}
+      {showGreeting && userProfile && (
+        <div
+          style={{
+            background: 'rgba(255,255,255,0.2)',
+            backdropFilter: 'blur(10px)',
+            padding: 15,
+            borderRadius: 8,
+            marginBottom: 15,
+            border: '1px solid rgba(255,255,255,0.3)',
+            fontSize: 16
+          }}
+        >
+          👋 <strong>Hello, {displayName}!</strong>
+        </div>
+      )}
 
       {/* Proactive Notifications Section */}
       {isProMode && notifications.length > 0 && (
