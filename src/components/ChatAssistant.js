@@ -35,7 +35,6 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       memoryRef.current = new MemoryManager(userId)
       await memoryRef.current.loadProfile()
 
-      // Build tools object
       const tools = {
         add_expense: async (params) => {
           const result = await onAICommand({ action: 'add_expense', data: params })
@@ -55,13 +54,11 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
         }
       }
 
-      // Pass tools to NovaAgent constructor
       agentRef.current = new NovaAgent(memoryRef.current, tools, true)
 
       setIsInitialized(true)
       console.log('✅ Nova initialized')
 
-      // Load voice greeting preference
       const { data, error } = await supabase
         .from('user_preferences')
         .select('preference_value')
@@ -77,11 +74,11 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     initNova()
   }, [userId, onAICommand])
 
-  // Greet user on login
   useEffect(() => {
     if (isInitialized && isProMode && voiceGreetingEnabled && memoryRef.current && !hasGreeted) {
-      const userName = memoryRef.current.getNickname()
-      const greeting = userName !== 'friend' ? `Hello ${userName}!` : 'Hello!'
+      const displayName = memoryRef.current.preferences.display_name || memoryRef.current.getNickname()
+      const title = memoryRef.current.preferences.title
+      const greeting = title ? `Hello ${displayName}, ${title}!` : `Hello ${displayName}!`
       speak(greeting)
       setHasGreeted(true)
     }
