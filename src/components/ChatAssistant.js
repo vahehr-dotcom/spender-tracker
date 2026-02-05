@@ -3,6 +3,9 @@ import { supabase } from '../supabaseClient'
 import MemoryManager from '../lib/MemoryManager'
 import NovaAgent from '../lib/NovaAgent'
 
+// Global flag to prevent multiple greetings across all instances
+let hasGreetedGlobally = false
+
 function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICommand, userId, notifications = [], onDismissNotification }) {
   const [aiInput, setAiInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
@@ -13,7 +16,6 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
   const [shouldAutoSubmit, setShouldAutoSubmit] = useState(false)
   const [isInitialized, setIsInitialized] = useState(false)
   const [voiceGreetingEnabled, setVoiceGreetingEnabled] = useState(true)
-  const [hasGreeted, setHasGreeted] = useState(false)
 
   const recognitionRef = useRef(null)
   const audioRef = useRef(null)
@@ -22,6 +24,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
   const expensesRef = useRef(expenses)
   const categoriesRef = useRef(categories)
   const profileLoadedRef = useRef(false)
+  const initLockRef = useRef(false)
 
   useEffect(() => {
     expensesRef.current = expenses
@@ -29,7 +32,8 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
   }, [expenses, categories])
 
   useEffect(() => {
-    if (!userId) return
+    if (!userId || initLockRef.current) return
+    initLockRef.current = true
 
     const initNova = async () => {
       memoryRef.current = new MemoryManager(userId)
@@ -70,8 +74,9 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       setIsInitialized(true)
       console.log('✅ Nova initialized')
       
-      // Greet after a short delay to ensure DOM is ready for audio
-      if (isProMode && (error || !data || data.preference_value === 'true')) {
+      // Greet ONCE per page session
+      if (isProMode && !hasGreetedGlobally && (error || !data || data.preference_value === 'true')) {
+        hasGreetedGlobally = true
         setTimeout(() => {
           const displayName = memoryRef.current?.preferences?.display_name || memoryRef.current?.getNickname() || 'friend'
           const title = memoryRef.current?.preferences?.title
@@ -169,7 +174,8 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
         body: JSON.stringify({
           model: 'tts-1',
           voice: 'nova',
-          input: text
+          input: text,
+          speed: 0.95
         })
       })
 
