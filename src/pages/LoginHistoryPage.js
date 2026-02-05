@@ -63,27 +63,27 @@ function LoginHistoryPage() {
     return `${hours}h ${minutes}m`;
   };
 
-  const getDeviceName = (platform) => {
-    if (!platform) return 'Unknown';
-    if (platform.includes('Win')) return 'Windows';
-    if (platform.includes('Mac')) return 'Mac';
-    if (platform.includes('Linux')) return 'Linux';
-    if (platform.includes('iPhone') || platform.includes('iPad')) return 'iOS';
-    if (platform.includes('Android')) return 'Android';
-    return platform;
+  const getDeviceName = (userAgent) => {
+    if (!userAgent) return 'Unknown';
+    if (userAgent.includes('Win')) return 'Windows';
+    if (userAgent.includes('Mac')) return 'Mac';
+    if (userAgent.includes('Linux')) return 'Linux';
+    if (userAgent.includes('iPhone') || userAgent.includes('iPad')) return 'iOS';
+    if (userAgent.includes('Android')) return 'Android';
+    return 'Unknown';
   };
 
   const getBrowserName = (userAgent) => {
     if (!userAgent) return 'Unknown';
+    if (userAgent.includes('Edg')) return 'Edge';
     if (userAgent.includes('Chrome')) return 'Chrome';
     if (userAgent.includes('Firefox')) return 'Firefox';
     if (userAgent.includes('Safari')) return 'Safari';
-    if (userAgent.includes('Edge')) return 'Edge';
     return 'Unknown';
   };
 
-  const getDeviceIcon = (platform) => {
-    const device = getDeviceName(platform);
+  const getDeviceIcon = (userAgent) => {
+    const device = getDeviceName(userAgent);
     if (device === 'Windows' || device === 'Mac' || device === 'Linux') return '💻';
     if (device === 'iOS' || device === 'Android') return '📱';
     return '🖥️';
@@ -181,7 +181,6 @@ function LoginHistoryPage() {
                 <th style={{ padding: '12px', textAlign: 'left' }}>Email</th>
                 <th style={{ padding: '12px', textAlign: 'left' }}>Device</th>
                 <th style={{ padding: '12px', textAlign: 'left' }}>Browser</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Timezone</th>
                 <th style={{ padding: '12px', textAlign: 'left' }}>Login Time</th>
                 <th style={{ padding: '12px', textAlign: 'left' }}>Duration</th>
                 <th style={{ padding: '12px', textAlign: 'left' }}>Status</th>
@@ -190,12 +189,11 @@ function LoginHistoryPage() {
             <tbody>
               {filteredSessions.map((log) => (
                 <tr key={log.id} style={{ borderBottom: '1px solid #dee2e6' }}>
-                  <td style={{ padding: '12px' }}>{log.email || 'Unknown'}</td>
+                  <td style={{ padding: '12px', fontWeight: 'bold' }}>{log.email || 'Unknown'}</td>
                   <td style={{ padding: '12px' }}>
-                    {getDeviceIcon(log.device_info?.platform)} {getDeviceName(log.device_info?.platform)}
+                    {getDeviceIcon(log.device_info)} {getDeviceName(log.device_info)}
                   </td>
-                  <td style={{ padding: '12px' }}>{getBrowserName(log.device_info?.user_agent)}</td>
-                  <td style={{ padding: '12px' }}>{log.device_info?.timezone || 'Unknown'}</td>
+                  <td style={{ padding: '12px' }}>{getBrowserName(log.device_info)}</td>
                   <td style={{ padding: '12px' }}>{formatDate(log.session_start)}</td>
                   <td style={{ padding: '12px' }}>{formatDuration(log.duration_seconds)}</td>
                   <td style={{ padding: '12px' }}>
