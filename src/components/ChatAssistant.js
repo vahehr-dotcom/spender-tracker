@@ -13,6 +13,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
   const [shouldAutoSubmit, setShouldAutoSubmit] = useState(false)
   const [isInitialized, setIsInitialized] = useState(false)
   const [voiceGreetingEnabled, setVoiceGreetingEnabled] = useState(true)
+  const [hasGreeted, setHasGreeted] = useState(false)
 
   const recognitionRef = useRef(null)
   const audioRef = useRef(null)
@@ -69,6 +70,16 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
     initNova()
   }, [userId, onAICommand])
+
+  // NEW: Greet user on login
+  useEffect(() => {
+    if (isInitialized && isProMode && voiceGreetingEnabled && memoryRef.current && !hasGreeted) {
+      const userName = memoryRef.current.getNickname()
+      const greeting = userName !== 'friend' ? `Hello ${userName}!` : 'Hello!'
+      speak(greeting)
+      setHasGreeted(true)
+    }
+  }, [isInitialized, isProMode, voiceGreetingEnabled])
 
   useEffect(() => {
     if (isProMode && !profileLoadedRef.current && agentRef.current) {
