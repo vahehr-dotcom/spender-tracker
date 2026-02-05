@@ -228,6 +228,7 @@ function MainApp() {
       });
       
       setUserProfile(profile);
+      console.log('Loaded user profile:', profile);
     } catch (error) {
       console.error('Load profile error:', error);
     }
@@ -768,9 +769,9 @@ function MainApp() {
         </div>
       </div>
 
-      {userProfile && (
+      {userProfile?.display_name && (
         <p style={{ marginBottom: '20px', fontSize: '18px', color: '#333' }}>
-          <strong>Hello, {userProfile.display_name || session.user.email}</strong>
+          <strong>Hello, {userProfile.display_name}</strong>
           {userProfile.title && <span style={{ color: '#666' }}> - {userProfile.title}</span>}
         </p>
       )}
@@ -797,7 +798,9 @@ function MainApp() {
           <ChatAssistant 
             userId={session?.user?.id}
             userProfile={userProfile}
+            isProMode={isProMode}
             onCommand={handleAICommand}
+            onUpgradeToPro={() => setShowUpgrade(true)}
             expenses={expenses}
           />
         </div>

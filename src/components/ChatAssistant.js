@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { supabase } from '../supabaseClient'
 import MemoryManager from '../lib/MemoryManager'
 import NovaAgent from '../lib/NovaAgent'
 
@@ -21,7 +22,7 @@ export default function ChatAssistant({
   const [voiceTranscript, setVoiceTranscript] = useState('')
   const [shouldAutoSubmit, setShouldAutoSubmit] = useState(false)
   const [isInitialized, setIsInitialized] = useState(false)
-  const [showGreeting, setShowGreeting] = useState(true)
+  const [voiceGreetingEnabled, setVoiceGreetingEnabled] = useState(true)
 
   const recognitionRef = useRef(null)
   const audioRef = useRef(null)
@@ -39,13 +40,101 @@ export default function ChatAssistant({
     categoriesRef.current = categories
   }, [categories])
 
-  // Load greeting preference from localStorage
+  // Load voice greeting preference from database
   useEffect(() => {
-    const savedGreetingPref = localStorage.getItem('novaGreeting')
-    if (savedGreetingPref !== null) {
-      setShowGreeting(savedGreetingPref === 'true')
+    if (userId) {
+      loadVoiceGreetingPreference()
     }
-  }, [])
+  }, [userId])
+
+  const loadVoiceGreetingPreference = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('user_preferences')
+        .select('preferences_value')
+        .eq('user_id', userId)
+        .eq('preferences_type', 'voice_greeting')
+        .maybeSingle()
+
+      if (error) throw error
+      
+      if (data) {
+        setVoiceGreetingEnabled(data.preferences_value === 'true' || data.preferences_value === true)
+      }
+    } catch (error) {
+      console.error('Load voice greeting preference error:', error)
+    }
+  }
+
+  const toggleVoiceGreeting = async () => {
+    const newValue = !voiceGreetingEnabled
+    setVoiceGreetingEnabled(newValue)
+
+    try {
+      // Check if preference exists
+      const { data: existing } = await supabase
+        .from('user_preferences')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('preferences_type', 'voice_greeting')
+        .maybeSingle()
+
+      if (existing) {
+        // Update existing
+        await supabase
+          .from('user_preferences')
+          .update({ preferences_value: newValue.toString() })
+          .eq('user_id', userId)
+          .eq('preferences_type', 'voice_greeting')
+      } else {
+        // Insert new
+        await supabase
+          .from('user_preferences')
+          .insert({
+            user_id: userId,
+            preferences_type: 'voice_greeting',
+            preferences_value: newValue.toString()
+          })
+      }
+
+      console.log('Voice greeting preference saved:', newValue)
+    } catch (error) {
+      console.error('Save voice greeting preference error:', error)
+    }
+  }
+
+  const updateUserPreference = async (prefType, prefValue) => {
+    try {
+      const { data: existing } = await supabase
+        .from('user_preferences')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('preferences_type', prefType)
+        .maybeSingle()
+
+      if (existing) {
+        await supabase
+          .from('user_preferences')
+          .update({ preferences_value: prefValue })
+          .eq('user_id', userId)
+          .eq('preferences_type', prefType)
+      } else {
+        await supabase
+          .from('user_preferences')
+          .insert({
+            user_id: userId,
+            preferences_type: prefType,
+            preferences_value: prefValue
+          })
+      }
+
+      console.log(`Preference ${prefType} updated to:`, prefValue)
+      return true
+    } catch (error) {
+      console.error('Update preference error:', error)
+      return false
+    }
+  }
 
   // Initialize Memory and Agent
   useEffect(() => {
@@ -63,7 +152,8 @@ export default function ChatAssistant({
         update_expense: (data) => onAICommand({ action: 'update_expense', data }),
         add_expense: (data) => onAICommand({ action: 'add_expense', data }),
         search: (data) => onAICommand({ action: 'search', data }),
-        export: () => onAICommand({ action: 'export' })
+        export: () => onAICommand({ action: 'export' }),
+        update_preference: updateUserPreference
       }
 
       const agent = new NovaAgent(memory, tools, isProMode)
@@ -83,7 +173,6 @@ export default function ChatAssistant({
         console.log('📥 Loading profile for PRO user...')
         await memoryRef.current.loadProfile()
         
-        // Update agent with PRO mode
         if (agentRef.current) {
           agentRef.current.isProMode = true
         }
@@ -140,12 +229,6 @@ export default function ChatAssistant({
     }
   }, [])
 
-  const toggleGreeting = () => {
-    const newValue = !showGreeting
-    setShowGreeting(newValue)
-    localStorage.setItem('novaGreeting', newValue.toString())
-  }
-
   const startListening = () => {
     if (recognitionRef.current && !isListening) {
       setVoiceTranscript('')
@@ -162,7 +245,7 @@ export default function ChatAssistant({
   }
 
   const speak = async (text) => {
-    if (!text) return
+    if (!text || !voiceGreetingEnabled) return
 
     setIsSpeaking(true)
 
@@ -245,6 +328,50 @@ export default function ChatAssistant({
 
     console.log('💬 User message:', userMessage)
 
+    // Check for preference commands
+    const lowerMessage = userMessage.toLowerCase()
+    
+    // Voice greeting commands
+    if (lowerMessage.includes('turn off voice greeting') || lowerMessage.includes('disable voice greeting')) {
+      const success = await updateUserPreference('voice_greeting', 'false')
+      if (success) {
+        setVoiceGreetingEnabled(false)
+        const response = 'Voice greeting has been turned off.'
+        setLastResponse(response)
+        setIsThinking(false)
+        return
+      }
+    }
+    
+    if (lowerMessage.includes('turn on voice greeting') || lowerMessage.includes('enable voice greeting')) {
+      const success = await updateUserPreference('voice_greeting', 'true')
+      if (success) {
+        setVoiceGreetingEnabled(true)
+        const response = 'Voice greeting has been turned on.'
+        setLastResponse(response)
+        speak(response)
+        setIsThinking(false)
+        return
+      }
+    }
+
+    // Display name change commands
+    if (lowerMessage.includes('call me') || lowerMessage.includes('my name is')) {
+      const nameMatch = userMessage.match(/call me (.+)|my name is (.+)/i)
+      if (nameMatch) {
+        const newName = (nameMatch[1] || nameMatch[2]).trim()
+        const success = await updateUserPreference('display_name', newName)
+        if (success) {
+          const response = `Got it! I'll call you ${newName} from now on.`
+          setLastResponse(response)
+          speak(response)
+          setIsThinking(false)
+          window.location.reload() // Reload to show new name
+          return
+        }
+      }
+    }
+
     // Add user message to session memory
     memory.addMessage('user', userMessage)
 
@@ -273,7 +400,7 @@ export default function ChatAssistant({
         }
       }
 
-      // Build system prompt (now includes emotional intelligence)
+      // Build system prompt
       const systemPrompt = agent.buildSystemPrompt(expenseData)
 
       // Build messages with conversation history
@@ -307,7 +434,7 @@ export default function ChatAssistant({
       memory.addMessage('assistant', aiResponse)
       setLastResponse(aiResponse)
 
-      // CRITICAL: Save to database (PRO only)
+      // Save to database (PRO only)
       if (isProMode) {
         console.log('💾 Saving conversation to database...')
         
@@ -331,7 +458,6 @@ export default function ChatAssistant({
   }
 
   const nickname = memoryRef.current?.getNickname() || 'there'
-  const displayName = userProfile?.display_name || 'there'
 
   // Get notification icon
   const getNotificationIcon = (type) => {
@@ -395,21 +521,23 @@ export default function ChatAssistant({
         </h3>
         
         <div style={{ display: 'flex', gap: 10 }}>
-          <button
-            onClick={toggleGreeting}
-            style={{
-              padding: '6px 12px',
-              fontSize: 12,
-              background: 'rgba(255,255,255,0.2)',
-              color: 'white',
-              border: '1px solid rgba(255,255,255,0.3)',
-              borderRadius: 6,
-              cursor: 'pointer'
-            }}
-            title={showGreeting ? 'Hide greeting' : 'Show greeting'}
-          >
-            {showGreeting ? '👋 Hide Greeting' : '👋 Show Greeting'}
-          </button>
+          {isProMode && (
+            <button
+              onClick={toggleVoiceGreeting}
+              style={{
+                padding: '6px 12px',
+                fontSize: 12,
+                background: voiceGreetingEnabled ? 'rgba(76, 175, 80, 0.3)' : 'rgba(244, 67, 54, 0.3)',
+                color: 'white',
+                border: '1px solid rgba(255,255,255,0.3)',
+                borderRadius: 6,
+                cursor: 'pointer'
+              }}
+              title={voiceGreetingEnabled ? 'Voice greeting is ON' : 'Voice greeting is OFF'}
+            >
+              🔊 Voice Greeting {voiceGreetingEnabled ? 'ON' : 'OFF'}
+            </button>
+          )}
           
           {memoryRef.current && memoryRef.current.sessionMessages.length > 0 && (
             <button
@@ -429,23 +557,6 @@ export default function ChatAssistant({
           )}
         </div>
       </div>
-
-      {/* Nova Greeting */}
-      {showGreeting && userProfile && (
-        <div
-          style={{
-            background: 'rgba(255,255,255,0.2)',
-            backdropFilter: 'blur(10px)',
-            padding: 15,
-            borderRadius: 8,
-            marginBottom: 15,
-            border: '1px solid rgba(255,255,255,0.3)',
-            fontSize: 16
-          }}
-        >
-          👋 <strong>Hello, {displayName}!</strong>
-        </div>
-      )}
 
       {/* Proactive Notifications Section */}
       {isProMode && notifications.length > 0 && (
