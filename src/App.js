@@ -769,7 +769,7 @@ function MainApp() {
         </div>
       </div>
 
-      {userProfile?.display_name && (
+    {userProfile && userProfile.display_name && (
         <p style={{ marginBottom: '20px', fontSize: '18px', color: '#333' }}>
           <strong>Hello, {userProfile.display_name}</strong>
           {userProfile.title && <span style={{ color: '#666' }}> - {userProfile.title}</span>}
