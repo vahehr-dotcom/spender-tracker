@@ -64,7 +64,7 @@ function LoginHistoryPage() {
   };
 
   const getDeviceName = (userAgent) => {
-    if (!userAgent) return 'Unknown';
+    if (!userAgent || typeof userAgent !== 'string') return 'Unknown';
     if (userAgent.includes('Win')) return 'Windows';
     if (userAgent.includes('Mac')) return 'Mac';
     if (userAgent.includes('Linux')) return 'Linux';
@@ -74,7 +74,7 @@ function LoginHistoryPage() {
   };
 
   const getBrowserName = (userAgent) => {
-    if (!userAgent) return 'Unknown';
+    if (!userAgent || typeof userAgent !== 'string') return 'Unknown';
     if (userAgent.includes('Edg')) return 'Edge';
     if (userAgent.includes('Chrome')) return 'Chrome';
     if (userAgent.includes('Firefox')) return 'Firefox';
