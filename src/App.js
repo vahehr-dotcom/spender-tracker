@@ -120,6 +120,28 @@ function MainApp() {
     }
   }, [session])
 
+  const handleLogin = async (email, password) => {
+    try {
+      setLoginStatus('Logging in...')
+      
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      })
+
+      if (error) {
+        setLoginStatus(`Error: ${error.message}`)
+        return
+      }
+
+      setSession(data.session)
+      setLoginStatus('Login successful!')
+    } catch (err) {
+      console.error('Login error:', err)
+      setLoginStatus('Login failed. Please try again.')
+    }
+  }
+
   const startSession = async (userId, email) => {
     try {
       const { data: existingSession } = await supabase
@@ -731,7 +753,7 @@ function MainApp() {
   if (!session) {
     return (
       <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
-        <Login setLoginStatus={setLoginStatus} loginStatus={loginStatus} />
+        <Login onLogin={handleLogin} status={loginStatus} />
       </div>
     )
   }
