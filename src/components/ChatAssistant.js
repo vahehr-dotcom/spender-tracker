@@ -35,22 +35,28 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       memoryRef.current = new MemoryManager(userId)
       await memoryRef.current.loadProfile()
 
-      agentRef.current = new NovaAgent(memoryRef.current)
+      // Build tools object
+      const tools = {
+        add_expense: async (params) => {
+          const result = await onAICommand({ action: 'add_expense', data: params })
+          return result
+        },
+        search: async (params) => {
+          const result = await onAICommand({ action: 'search', data: { term: params.query } })
+          return result
+        },
+        export: async () => {
+          const result = await onAICommand({ action: 'export', data: {} })
+          return result
+        },
+        update_expense: async (params) => {
+          const result = await onAICommand({ action: 'update_expense', data: params })
+          return result
+        }
+      }
 
-      agentRef.current.registerTool('add_expense', async (params) => {
-        const result = await onAICommand({ action: 'add_expense', data: params })
-        return result
-      })
-
-      agentRef.current.registerTool('search_expenses', async (params) => {
-        const result = await onAICommand({ action: 'search', data: { term: params.query } })
-        return result
-      })
-
-      agentRef.current.registerTool('export_expenses', async () => {
-        const result = await onAICommand({ action: 'export', data: {} })
-        return result
-      })
+      // Pass tools to NovaAgent constructor
+      agentRef.current = new NovaAgent(memoryRef.current, tools, true)
 
       setIsInitialized(true)
       console.log('✅ Nova initialized')
@@ -71,7 +77,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     initNova()
   }, [userId, onAICommand])
 
-  // NEW: Greet user on login
+  // Greet user on login
   useEffect(() => {
     if (isInitialized && isProMode && voiceGreetingEnabled && memoryRef.current && !hasGreeted) {
       const userName = memoryRef.current.getNickname()
