@@ -1,19 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import MemoryManager from '../lib/MemoryManager'
 import NovaAgent from '../lib/NovaAgent'
 
-export default function ChatAssistant({
-  expenses,
-  categories,
-  isProMode,
-  onUpgradeToPro,
-  onAICommand,
-  userId,
-  userProfile,
-  notifications = [],
-  onDismissNotification
-}) {
+function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICommand, userId, notifications = [], onDismissNotification }) {
   const [aiInput, setAiInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
   const [isListening, setIsListening] = useState(false)
@@ -34,206 +24,111 @@ export default function ChatAssistant({
 
   useEffect(() => {
     expensesRef.current = expenses
-  }, [expenses])
-
-  useEffect(() => {
     categoriesRef.current = categories
-  }, [categories])
+  }, [expenses, categories])
 
-  // Load voice greeting preference from database
   useEffect(() => {
-    if (userId) {
-      loadVoiceGreetingPreference()
-    }
-  }, [userId])
+    if (!userId) return
 
-  const loadVoiceGreetingPreference = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('user_preferences')
-        .select('preferences_value')
-        .eq('user_id', userId)
-        .eq('preferences_type', 'voice_greeting')
-        .maybeSingle()
+    const initNova = async () => {
+      memoryRef.current = new MemoryManager(userId)
+      await memoryRef.current.loadProfile()
 
-      if (error) throw error
-      
-      if (data) {
-        setVoiceGreetingEnabled(data.preferences_value === 'true' || data.preferences_value === true)
-      }
-    } catch (error) {
-      console.error('Load voice greeting preference error:', error)
-    }
-  }
+      agentRef.current = new NovaAgent(memoryRef.current)
 
-  const toggleVoiceGreeting = async () => {
-    const newValue = !voiceGreetingEnabled
-    setVoiceGreetingEnabled(newValue)
+      agentRef.current.registerTool('add_expense', async (params) => {
+        const result = await onAICommand({ action: 'add_expense', data: params })
+        return result
+      })
 
-    try {
-      // Check if preference exists
-      const { data: existing } = await supabase
-        .from('user_preferences')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('preferences_type', 'voice_greeting')
-        .maybeSingle()
+      agentRef.current.registerTool('search_expenses', async (params) => {
+        const result = await onAICommand({ action: 'search', data: { term: params.query } })
+        return result
+      })
 
-      if (existing) {
-        // Update existing
-        await supabase
-          .from('user_preferences')
-          .update({ preferences_value: newValue.toString() })
-          .eq('user_id', userId)
-          .eq('preferences_type', 'voice_greeting')
-      } else {
-        // Insert new
-        await supabase
-          .from('user_preferences')
-          .insert({
-            user_id: userId,
-            preferences_type: 'voice_greeting',
-            preferences_value: newValue.toString()
-          })
-      }
-
-      console.log('Voice greeting preference saved:', newValue)
-    } catch (error) {
-      console.error('Save voice greeting preference error:', error)
-    }
-  }
-
-  const updateUserPreference = async (prefType, prefValue) => {
-    try {
-      const { data: existing } = await supabase
-        .from('user_preferences')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('preferences_type', prefType)
-        .maybeSingle()
-
-      if (existing) {
-        await supabase
-          .from('user_preferences')
-          .update({ preferences_value: prefValue })
-          .eq('user_id', userId)
-          .eq('preferences_type', prefType)
-      } else {
-        await supabase
-          .from('user_preferences')
-          .insert({
-            user_id: userId,
-            preferences_type: prefType,
-            preferences_value: prefValue
-          })
-      }
-
-      console.log(`Preference ${prefType} updated to:`, prefValue)
-      return true
-    } catch (error) {
-      console.error('Update preference error:', error)
-      return false
-    }
-  }
-
-  // Initialize Memory and Agent
-  useEffect(() => {
-    if (!userId) {
-      console.warn('⏳ Waiting for userId...')
-      return
-    }
-
-    if (!memoryRef.current) {
-      console.log('🚀 Initializing Nova for user:', userId)
-      const memory = new MemoryManager(userId)
-      memoryRef.current = memory
-
-      const tools = {
-        update_expense: (data) => onAICommand({ action: 'update_expense', data }),
-        add_expense: (data) => onAICommand({ action: 'add_expense', data }),
-        search: (data) => onAICommand({ action: 'search', data }),
-        export: () => onAICommand({ action: 'export' }),
-        update_preference: updateUserPreference
-      }
-
-      const agent = new NovaAgent(memory, tools, isProMode)
-      agentRef.current = agent
+      agentRef.current.registerTool('export_expenses', async () => {
+        const result = await onAICommand({ action: 'export', data: {} })
+        return result
+      })
 
       setIsInitialized(true)
       console.log('✅ Nova initialized')
-    }
-  }, [userId, onAICommand, isProMode])
 
-  // Load profile when PRO mode activates
-  useEffect(() => {
-    if (isProMode && memoryRef.current && !profileLoadedRef.current) {
-      profileLoadedRef.current = true
-      
-      const loadProfile = async () => {
-        console.log('📥 Loading profile for PRO user...')
-        await memoryRef.current.loadProfile()
-        
-        if (agentRef.current) {
-          agentRef.current.isProMode = true
-        }
+      // Load voice greeting preference
+      const { data, error } = await supabase
+        .from('user_preferences')
+        .select('preference_value')
+        .eq('user_id', userId)
+        .eq('preference_type', 'voice_greeting')
+        .single()
+
+      if (!error && data) {
+        setVoiceGreetingEnabled(data.preference_value === 'true')
       }
-      
-      loadProfile()
+    }
+
+    initNova()
+  }, [userId, onAICommand])
+
+  useEffect(() => {
+    if (isProMode && !profileLoadedRef.current && agentRef.current) {
+      agentRef.current.pushContext('isProMode', true)
+      profileLoadedRef.current = true
     }
   }, [isProMode])
 
-  // Voice auto-submit trigger
   useEffect(() => {
     if (shouldAutoSubmit && aiInput.trim()) {
       setShouldAutoSubmit(false)
-      handleAISubmit({ preventDefault: () => {} })
+      handleAISubmit()
     }
   }, [shouldAutoSubmit, aiInput])
 
-  // Setup voice recognition
   useEffect(() => {
     if ('webkitSpeechRecognition' in window) {
-      const recognition = new window.webkitSpeechRecognition()
-      recognition.continuous = false
-      recognition.interimResults = false
-      recognition.lang = 'en-US'
+      const SpeechRecognition = window.webkitSpeechRecognition
+      recognitionRef.current = new SpeechRecognition()
+      recognitionRef.current.continuous = false
+      recognitionRef.current.interimResults = false
+      recognitionRef.current.lang = 'en-US'
 
-      recognition.onresult = (event) => {
+      recognitionRef.current.onresult = (event) => {
         const transcript = event.results[0][0].transcript
-        console.log('🎤 Voice transcript:', transcript)
         setVoiceTranscript(transcript)
         setAiInput(transcript)
-        setIsListening(false)
-        
-        setTimeout(() => {
-          setShouldAutoSubmit(true)
-        }, 500)
+        setShouldAutoSubmit(true)
       }
 
-      recognition.onerror = (event) => {
-        console.error('🎤 Voice error:', event.error)
+      recognitionRef.current.onerror = (event) => {
+        console.error('Speech recognition error:', event.error)
         setIsListening(false)
       }
 
-      recognition.onend = () => {
+      recognitionRef.current.onend = () => {
         setIsListening(false)
       }
-
-      recognitionRef.current = recognition
     }
 
     return () => {
       if (recognitionRef.current) {
         recognitionRef.current.stop()
       }
+      if (audioRef.current) {
+        audioRef.current.pause()
+      }
     }
   }, [])
 
   const startListening = () => {
+    if (!isProMode) {
+      onUpgradeToPro()
+      return
+    }
+
     if (recognitionRef.current && !isListening) {
-      setVoiceTranscript('')
       recognitionRef.current.start()
       setIsListening(true)
+      setVoiceTranscript('')
     }
   }
 
@@ -245,12 +140,12 @@ export default function ChatAssistant({
   }
 
   const speak = async (text) => {
-    if (!text || !voiceGreetingEnabled) return
-
-    setIsSpeaking(true)
+    if (!isProMode || !voiceGreetingEnabled) return
 
     try {
-      const res = await fetch('https://api.openai.com/v1/audio/speech', {
+      setIsSpeaking(true)
+
+      const response = await fetch('https://api.openai.com/v1/audio/speech', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -263,38 +158,28 @@ export default function ChatAssistant({
         })
       })
 
-      if (!res.ok) throw new Error('TTS failed')
-
-      const audioBlob = await res.blob()
+      const audioBlob = await response.blob()
       const audioUrl = URL.createObjectURL(audioBlob)
 
-      if (audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current = null
+      audioRef.current = new Audio(audioUrl)
+      audioRef.current.onended = () => {
+        setIsSpeaking(false)
+        URL.revokeObjectURL(audioUrl)
       }
-
-      const audio = new Audio(audioUrl)
-      audioRef.current = audio
-
-      audio.onended = () => {
+      audioRef.current.onerror = () => {
         setIsSpeaking(false)
         URL.revokeObjectURL(audioUrl)
       }
 
-      audio.onerror = () => {
-        setIsSpeaking(false)
-        URL.revokeObjectURL(audioUrl)
-      }
-
-      await audio.play()
+      await audioRef.current.play()
     } catch (err) {
-      console.error('🔊 TTS error:', err)
+      console.error('TTS error:', err)
       setIsSpeaking(false)
     }
   }
 
   const clearChat = () => {
-    if (window.confirm('Clear conversation? Nova will still remember you, just reset this chat.')) {
+    if (window.confirm('Clear conversation history?')) {
       if (memoryRef.current) {
         memoryRef.current.clearSession()
       }
@@ -302,449 +187,310 @@ export default function ChatAssistant({
     }
   }
 
-  const handleAISubmit = async (e) => {
-    e?.preventDefault()
-    
-    if (!isInitialized) {
-      console.warn('⏳ Nova not ready yet')
+  const toggleVoiceGreeting = async () => {
+    if (!isProMode) {
+      onUpgradeToPro()
       return
     }
 
-    if (!aiInput.trim() || isThinking) return
-
-    const userMessage = aiInput.trim()
-    setAiInput('')
-    setVoiceTranscript('')
-    setIsThinking(true)
-
-    const memory = memoryRef.current
-    const agent = agentRef.current
-
-    if (!memory || !agent) {
-      setLastResponse('Nova is still waking up... try again in a moment.')
-      setIsThinking(false)
-      return
-    }
-
-    console.log('💬 User message:', userMessage)
-
-    // Check for preference commands
-    const lowerMessage = userMessage.toLowerCase()
-    
-    // Voice greeting commands
-    if (lowerMessage.includes('turn off voice greeting') || lowerMessage.includes('disable voice greeting')) {
-      const success = await updateUserPreference('voice_greeting', 'false')
-      if (success) {
-        setVoiceGreetingEnabled(false)
-        const response = 'Voice greeting has been turned off.'
-        setLastResponse(response)
-        setIsThinking(false)
-        return
-      }
-    }
-    
-    if (lowerMessage.includes('turn on voice greeting') || lowerMessage.includes('enable voice greeting')) {
-      const success = await updateUserPreference('voice_greeting', 'true')
-      if (success) {
-        setVoiceGreetingEnabled(true)
-        const response = 'Voice greeting has been turned on.'
-        setLastResponse(response)
-        speak(response)
-        setIsThinking(false)
-        return
-      }
-    }
-
-    // Display name change commands
-    if (lowerMessage.includes('call me') || lowerMessage.includes('my name is')) {
-      const nameMatch = userMessage.match(/call me (.+)|my name is (.+)/i)
-      if (nameMatch) {
-        const newName = (nameMatch[1] || nameMatch[2]).trim()
-        const success = await updateUserPreference('display_name', newName)
-        if (success) {
-          const response = `Got it! I'll call you ${newName} from now on.`
-          setLastResponse(response)
-          speak(response)
-          setIsThinking(false)
-          window.location.reload() // Reload to show new name
-          return
-        }
-      }
-    }
-
-    // Add user message to session memory
-    memory.addMessage('user', userMessage)
-
-    // Build expense data
-    const expenseData = {
-      expenses: expensesRef.current || [],
-      categories: categoriesRef.current || []
-    }
-
-    console.log('📊 Expense data:', {
-      expenses: expenseData.expenses.length,
-      categories: expenseData.categories.length
-    })
+    const newValue = !voiceGreetingEnabled
+    setVoiceGreetingEnabled(newValue)
 
     try {
-      // Check for commands (PRO mode)
-      if (isProMode) {
-        const command = await agent.detectAndExecute(userMessage, expenseData)
-        
-        if (command) {
-          console.log('🚀 Executing command:', command)
-          
-          if (onAICommand) {
-            await onAICommand(command)
-          }
-        }
-      }
-
-      // Build system prompt
-      const systemPrompt = agent.buildSystemPrompt(expenseData)
-
-      // Build messages with conversation history
-      const messages = agent.buildMessages(systemPrompt, userMessage)
-
-      console.log('💬 Sending to OpenAI with context:', messages.length, 'messages')
-
-      // Call OpenAI
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          messages,
-          max_tokens: isProMode ? 500 : 200,
-          temperature: 0.7
-        })
+      await supabase.from('user_preferences').upsert({
+        user_id: userId,
+        preference_type: 'voice_greeting',
+        preference_value: newValue.toString(),
+        set_at: new Date().toISOString()
+      }, {
+        onConflict: 'user_id,preference_type'
       })
 
-      if (!res.ok) throw new Error('AI request failed')
+      const confirmMessage = newValue ? 'Voice greeting has been turned on.' : 'Voice greeting has been turned off.'
+      setLastResponse(confirmMessage)
+      if (newValue) {
+        speak(confirmMessage)
+      }
+    } catch (err) {
+      console.error('Toggle voice greeting error:', err)
+    }
+  }
 
-      const json = await res.json()
-      const aiResponse = json.choices?.[0]?.message?.content || 'Sorry, I had trouble with that.'
+  const handleAISubmit = async () => {
+    if (!isInitialized) {
+      setLastResponse('⚠️ Nova is initializing... please wait.')
+      return
+    }
 
-      console.log('🤖 Nova response:', aiResponse)
+    if (!aiInput.trim()) return
 
-      // Add AI response to session memory
-      memory.addMessage('assistant', aiResponse)
-      setLastResponse(aiResponse)
+    const userMessage = aiInput
+    setAiInput('')
+    setIsThinking(true)
 
-      // Save to database (PRO only)
-      if (isProMode) {
-        console.log('💾 Saving conversation to database...')
-        
-        await memory.saveConversation('user', userMessage)
-        await memory.saveConversation('assistant', aiResponse)
-        
-        console.log('🧠 Learning from conversation...')
-        await memory.learnFromConversation(userMessage, aiResponse)
-        
-        console.log('✅ Memory saved!')
+    try {
+      memoryRef.current.addMessage('user', userMessage)
+
+      let response = ''
+
+      if (isProMode && agentRef.current) {
+        const agentResponse = await agentRef.current.detectAndExecute(userMessage, {
+          expenses: expensesRef.current,
+          categories: categoriesRef.current
+        })
+
+        response = agentResponse.response || agentResponse.message || 'Done!'
+      } else {
+        const systemPrompt = `You are Nova, a friendly AI assistant for expense tracking. Be helpful and concise.${memoryRef.current.buildMemoryContext()}`
+
+        const conversationHistory = memoryRef.current.getConversationHistory()
+
+        const apiMessages = [
+          { role: 'system', content: systemPrompt },
+          ...conversationHistory.map(msg => ({ role: msg.role, content: msg.content })),
+          { role: 'user', content: userMessage }
+        ]
+
+        const apiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            messages: apiMessages,
+            max_tokens: 500
+          })
+        })
+
+        const data = await apiResponse.json()
+        response = data.choices[0].message.content
       }
 
-      setIsThinking(false)
-      speak(aiResponse)
+      setLastResponse(response)
+      memoryRef.current.addMessage('assistant', response)
 
+      if (isProMode) {
+        await memoryRef.current.saveConversation('user', userMessage)
+        await memoryRef.current.saveConversation('assistant', response)
+        await memoryRef.current.learnFromConversation(userMessage, response)
+      }
+
+      speak(response)
     } catch (err) {
-      console.error('💥 Nova error:', err)
-      setLastResponse('Sorry, something went wrong. Please try again.')
+      console.error('AI error:', err)
+      setLastResponse('❌ Sorry, something went wrong.')
+    } finally {
       setIsThinking(false)
     }
   }
 
-  const nickname = memoryRef.current?.getNickname() || 'there'
+  const nickname = memoryRef.current ? memoryRef.current.getNickname() : 'friend'
 
-  // Get notification icon
   const getNotificationIcon = (type) => {
-    switch (type) {
-      case 'greeting':
-        return '👋'
-      case 'inactivity':
-        return '⏰'
-      case 'budget_alert':
-        return '⚠️'
-      case 'budget_win':
-        return '🎉'
-      case 'pattern_detected':
-        return '🔍'
-      case 'subscription_detected':
-        return '💳'
-      case 'subscription_renewal':
-        return '⏰'
-      case 'budget_forecast':
-        return '📊'
-      case 'budget_forecast_alert':
-        return '⚠️'
-      case 'unused_subscription':
-        return '💡'
-      default:
-        return '💡'
+    const icons = {
+      insight: '💡',
+      warning: '⚠️',
+      achievement: '🏆',
+      tip: '💰'
     }
+    return icons[type] || '🔔'
   }
 
-  // Format notification time
   const formatNotificationTime = (timestamp) => {
-    const date = new Date(timestamp)
-    const now = new Date()
-    const diffMs = now - date
-    const diffMins = Math.floor(diffMs / 60000)
-    
-    if (diffMins < 1) return 'Just now'
-    if (diffMins < 60) return `${diffMins}m ago`
-    
-    const diffHours = Math.floor(diffMins / 60)
-    if (diffHours < 24) return `${diffHours}h ago`
-    
-    const diffDays = Math.floor(diffHours / 24)
-    return `${diffDays}d ago`
+    const diff = Date.now() - new Date(timestamp).getTime()
+    const minutes = Math.floor(diff / 60000)
+    if (minutes < 1) return 'Just now'
+    if (minutes < 60) return `${minutes}m ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h ago`
+    return `${Math.floor(hours / 24)}d ago`
   }
 
   return (
-    <div
-      style={{
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        color: '#fff',
-        padding: 20,
-        borderRadius: 12,
-        marginBottom: 30
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
-          🤖 Nova - Your AI Best Friend
-          {isProMode && <span style={{ fontSize: 12, opacity: 0.9 }}>✨ Learning Mode • 💜 Emotionally Intelligent</span>}
-        </h3>
-        
-        <div style={{ display: 'flex', gap: 10 }}>
+    <div style={{
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      borderRadius: '16px',
+      padding: '20px',
+      marginBottom: '20px',
+      color: 'white'
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <h3 style={{ margin: 0 }}>🤖 Nova AI Assistant</h3>
+          {isProMode && (
+            <span style={{
+              background: 'rgba(255,255,255,0.3)',
+              padding: '4px 12px',
+              borderRadius: '12px',
+              fontSize: '12px',
+              fontWeight: 'bold'
+            }}>
+              PRO
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '10px' }}>
           {isProMode && (
             <button
               onClick={toggleVoiceGreeting}
               style={{
-                padding: '6px 12px',
-                fontSize: 12,
-                background: voiceGreetingEnabled ? 'rgba(76, 175, 80, 0.3)' : 'rgba(244, 67, 54, 0.3)',
+                padding: '8px 12px',
+                background: voiceGreetingEnabled ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
+                border: '2px solid rgba(255,255,255,0.5)',
+                borderRadius: '8px',
                 color: 'white',
-                border: '1px solid rgba(255,255,255,0.3)',
-                borderRadius: 6,
-                cursor: 'pointer'
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 'bold'
               }}
-              title={voiceGreetingEnabled ? 'Voice greeting is ON' : 'Voice greeting is OFF'}
             >
               🔊 Voice Greeting {voiceGreetingEnabled ? 'ON' : 'OFF'}
             </button>
           )}
-          
           {memoryRef.current && memoryRef.current.sessionMessages.length > 0 && (
             <button
               onClick={clearChat}
               style={{
-                padding: '6px 12px',
-                fontSize: 12,
-                background: 'rgba(255,255,255,0.2)',
+                padding: '8px 12px',
+                background: 'rgba(239, 68, 68, 0.3)',
+                border: '2px solid rgba(255,255,255,0.5)',
+                borderRadius: '8px',
                 color: 'white',
-                border: '1px solid rgba(255,255,255,0.3)',
-                borderRadius: 6,
-                cursor: 'pointer'
+                cursor: 'pointer',
+                fontSize: '12px'
               }}
             >
-              Clear Chat
+              🗑️ Clear Chat
             </button>
           )}
         </div>
       </div>
 
-      {/* Proactive Notifications Section */}
-      {isProMode && notifications.length > 0 && (
-        <div style={{ marginBottom: 15, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {notifications.map((notif) => (
+      {isProMode && notifications && notifications.length > 0 && (
+        <div style={{ marginBottom: '15px' }}>
+          {notifications.map((notif, idx) => (
             <div
-              key={notif.id}
+              key={idx}
               style={{
                 background: 'rgba(255,255,255,0.2)',
-                backdropFilter: 'blur(10px)',
-                padding: 12,
-                borderRadius: 8,
+                padding: '12px',
+                borderRadius: '8px',
+                marginBottom: '8px',
                 display: 'flex',
                 justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                border: '1px solid rgba(255,255,255,0.3)',
-                animation: 'slideIn 0.3s ease-out'
+                alignItems: 'center'
               }}
             >
-              <div style={{ flex: 1, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                <span style={{ fontSize: 24, lineHeight: 1 }}>
-                  {getNotificationIcon(notif.notification_type)}
-                </span>
-                <div style={{ flex: 1 }}>
-                  <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5 }}>
-                    {notif.message}
-                  </p>
-                  <p style={{ margin: '4px 0 0 0', fontSize: 11, opacity: 0.7 }}>
-                    {formatNotificationTime(notif.created_at)}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '20px' }}>{getNotificationIcon(notif.type)}</span>
+                <div>
+                  <p style={{ margin: 0, fontWeight: 'bold' }}>{notif.message}</p>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '12px', opacity: 0.8 }}>
+                    {formatNotificationTime(notif.timestamp)}
                   </p>
                 </div>
               </div>
-              <button
-                onClick={() => onDismissNotification(notif.id)}
-                style={{
-                  background: 'rgba(255,255,255,0.2)',
-                  border: '1px solid rgba(255,255,255,0.3)',
-                  color: 'white',
-                  padding: '4px 8px',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  marginLeft: 10,
-                  flexShrink: 0
-                }}
-              >
-                ✕
-              </button>
+              {onDismissNotification && (
+                <button
+                  onClick={() => onDismissNotification(idx)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'white',
+                    cursor: 'pointer',
+                    fontSize: '18px'
+                  }}
+                >
+                  ×
+                </button>
+              )}
             </div>
           ))}
         </div>
       )}
 
-      {!isInitialized && (
-        <div style={{ textAlign: 'center', opacity: 0.8, padding: 20 }}>
-          ⏳ Nova is waking up...
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+        <input
+          type="text"
+          value={aiInput}
+          onChange={(e) => setAiInput(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && handleAISubmit()}
+          placeholder={isProMode ? `Ask Nova anything, ${nickname}...` : "Ask Nova about your expenses..."}
+          disabled={isThinking || isListening}
+          style={{
+            flex: 1,
+            padding: '12px',
+            border: '2px solid rgba(255,255,255,0.3)',
+            borderRadius: '8px',
+            background: 'rgba(255,255,255,0.2)',
+            color: 'white',
+            fontSize: '14px'
+          }}
+        />
+        {isProMode && (
+          <button
+            onClick={isListening ? stopListening : startListening}
+            disabled={isThinking}
+            style={{
+              padding: '12px 20px',
+              background: isListening ? '#ef4444' : 'rgba(255,255,255,0.3)',
+              border: '2px solid rgba(255,255,255,0.5)',
+              borderRadius: '8px',
+              color: 'white',
+              cursor: isThinking ? 'not-allowed' : 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            {isListening ? '🔴 Stop' : '🎤 Speak'}
+          </button>
+        )}
+        <button
+          onClick={handleAISubmit}
+          disabled={isThinking || !aiInput.trim()}
+          style={{
+            padding: '12px 20px',
+            background: isThinking ? '#6b7280' : 'rgba(255,255,255,0.3)',
+            border: '2px solid rgba(255,255,255,0.5)',
+            borderRadius: '8px',
+            color: 'white',
+            cursor: isThinking || !aiInput.trim() ? 'not-allowed' : 'pointer',
+            fontWeight: 'bold'
+          }}
+        >
+          {isThinking ? '⏳ Thinking...' : '✨ Ask'}
+        </button>
+      </div>
+
+      {lastResponse && (
+        <div style={{
+          background: 'rgba(255,255,255,0.2)',
+          padding: '15px',
+          borderRadius: '8px',
+          marginTop: '15px'
+        }}>
+          <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{lastResponse}</p>
+          {isSpeaking && (
+            <p style={{ margin: '10px 0 0 0', fontSize: '12px', opacity: 0.8 }}>🔊 Speaking...</p>
+          )}
         </div>
       )}
 
-      {isInitialized && (
-        <>
-          {voiceTranscript && (
-            <div
-              style={{
-                background: 'rgba(255,255,255,0.2)',
-                padding: 10,
-                borderRadius: 8,
-                marginBottom: 15,
-                fontSize: 14
-              }}
-            >
-              🎤 You said: "{voiceTranscript}"
-            </div>
-          )}
-
-          <form onSubmit={handleAISubmit} style={{ display: 'flex', gap: 10, marginBottom: 15 }}>
-            <input
-              type="text"
-              value={aiInput}
-              onChange={(e) => setAiInput(e.target.value)}
-              placeholder={isProMode ? `Hey ${nickname}, what's on your mind?` : "Ask me about your expenses..."}
-              disabled={isThinking || isListening}
-              style={{
-                flex: 1,
-                padding: 10,
-                fontSize: 15,
-                border: 'none',
-                borderRadius: 8,
-                outline: 'none'
-              }}
-            />
-
-            {recognitionRef.current && (
-              <button
-                type="button"
-                onClick={isListening ? stopListening : startListening}
-                disabled={isThinking}
-                style={{
-                  padding: '10px 16px',
-                  fontSize: 18,
-                  border: 'none',
-                  borderRadius: 8,
-                  cursor: 'pointer',
-                  background: isListening ? '#FF5252' : 'white',
-                  color: isListening ? 'white' : '#333'
-                }}
-              >
-                {isListening ? '⏹️' : '🎤'}
-              </button>
-            )}
-
-            <button
-              type="submit"
-              disabled={isThinking || isListening || !aiInput.trim()}
-              style={{
-                padding: '10px 20px',
-                fontSize: 15,
-                fontWeight: 'bold',
-                border: 'none',
-                borderRadius: 8,
-                cursor: 'pointer',
-                background: 'white',
-                color: '#667eea',
-                opacity: isThinking || isListening || !aiInput.trim() ? 0.5 : 1
-              }}
-            >
-              {isThinking ? '🤔 Thinking...' : 'Ask'}
-            </button>
-          </form>
-
-          {isListening && (
-            <div style={{ textAlign: 'center', opacity: 0.9, marginBottom: 15 }}>
-              🎙️ Listening...
-            </div>
-          )}
-
-          {isSpeaking && (
-            <div style={{ textAlign: 'center', opacity: 0.9, marginBottom: 15 }}>
-              🔊 Speaking...
-            </div>
-          )}
-
-          {lastResponse && (
-            <div
-              style={{
-                background: 'rgba(255,255,255,0.15)',
-                padding: 15,
-                borderRadius: 8,
-                marginTop: 15,
-                lineHeight: 1.6
-              }}
-            >
-              <strong>Nova:</strong> {lastResponse}
-            </div>
-          )}
-
-          {!isProMode && (
-            <div
-              style={{
-                marginTop: 15,
-                padding: 12,
-                background: 'rgba(255,255,255,0.1)',
-                borderRadius: 8,
-                fontSize: 13,
-                opacity: 0.95
-              }}
-            >
-              💡 <strong>Upgrade to PRO</strong> to unlock Nova's full intelligence - emotional understanding, perfect memory, and true AI companionship!{' '}
-              <button
-                onClick={onUpgradeToPro}
-                style={{
-                  marginLeft: 10,
-                  padding: '4px 12px',
-                  background: 'white',
-                  color: '#667eea',
-                  border: 'none',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: 12
-                }}
-              >
-                Upgrade Now
-              </button>
-            </div>
-          )}
-        </>
+      {!isProMode && (
+        <div style={{
+          marginTop: '15px',
+          padding: '12px',
+          background: 'rgba(255,255,255,0.2)',
+          borderRadius: '8px',
+          fontSize: '13px',
+          textAlign: 'center'
+        }}>
+          💡 Upgrade to PRO for voice commands, memory, and advanced AI features!
+        </div>
       )}
     </div>
   )
 }
+
+export default ChatAssistant

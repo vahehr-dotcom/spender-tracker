@@ -1,274 +1,294 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom';
-import LoginHistoryPage from './pages/LoginHistoryPage';
-import { supabase } from './supabaseClient';
-import Login from './components/Login';
-import ChatAssistant from './components/ChatAssistant';
-import AddExpenseForm from './components/AddExpenseForm';
-import ExpenseList from './components/ExpenseList';
-import MonthlySummary from './components/MonthlySummary';
-import FileImport from './components/FileImport';
-import ImportPreview from './components/ImportPreview';
-import AnalyticsDashboard from './components/AnalyticsDashboard';
-import { ProactiveEngine } from './lib/ProactiveEngine';
-import { PatternAnalyzer } from './lib/PatternAnalyzer';
-import { PredictiveEngine } from './lib/PredictiveEngine';
+import React, { useState, useEffect, useRef } from 'react'
+import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom'
+import { supabase } from './supabaseClient'
+import Login from './components/Login'
+import ChatAssistant from './components/ChatAssistant'
+import AddExpenseForm from './components/AddExpenseForm'
+import ExpenseList from './components/ExpenseList'
+import MonthlySummary from './components/MonthlySummary'
+import FileImport from './components/FileImport'
+import ImportPreview from './components/ImportPreview'
+import AnalyticsDashboard from './components/AnalyticsDashboard'
+import LoginHistoryPage from './pages/LoginHistoryPage'
+import ProactiveEngine from './lib/ProactiveEngine'
+import PatternAnalyzer from './lib/PatternAnalyzer'
+import PredictiveEngine from './lib/PredictiveEngine'
 
-function AnalyticsPage() {
-  const navigate = useNavigate();
+const AnalyticsPage = () => {
+  const navigate = useNavigate()
   return (
     <div style={{ padding: '20px' }}>
-      <button onClick={() => navigate('/')} style={{ marginBottom: '20px', padding: '10px 20px', cursor: 'pointer', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px' }}>
+      <button onClick={() => navigate('/')} style={{ marginBottom: '20px', padding: '10px 20px', cursor: 'pointer' }}>
         ← Back to Dashboard
       </button>
       <AnalyticsDashboard />
     </div>
-  );
+  )
 }
 
 function MainApp() {
-  const navigate = useNavigate();
-  const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [expenses, setExpenses] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [showArchived, setShowArchived] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [pendingUndo, setPendingUndo] = useState(null);
-  const [showImport, setShowImport] = useState(false);
-  const [parsedTransactions, setParsedTransactions] = useState([]);
-  const [userRole, setUserRole] = useState(null);
-  const [userProfile, setUserProfile] = useState(null);
-  const [subscriptionStatus, setSubscriptionStatus] = useState('free');
-  const [testMode, setTestMode] = useState(false);
-  const [showUpgrade, setShowUpgrade] = useState(false);
-  const [loginStatus, setLoginStatus] = useState('');
+  const [session, setSession] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [expenses, setExpenses] = useState([])
+  const [categories, setCategories] = useState([])
+  const [showArchived, setShowArchived] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [pendingUndo, setPendingUndo] = useState(null)
+  const [showImport, setShowImport] = useState(false)
+  const [parsedTransactions, setParsedTransactions] = useState([])
+  const [userRole, setUserRole] = useState('user')
+  const [userProfile, setUserProfile] = useState(null)
+  const [subscriptionStatus, setSubscriptionStatus] = useState('basic')
+  const [testMode, setTestMode] = useState(false)
+  const [showUpgrade, setShowUpgrade] = useState(false)
+  const [loginStatus, setLoginStatus] = useState('')
 
-  const sessionIdRef = useRef(null);
-  const intervalRef = useRef(null);
-  const sessionStartRef = useRef(null);
-  const merchantMemoryRef = useRef(new Map());
+  const sessionIdRef = useRef(null)
+  const intervalRef = useRef(null)
+  const sessionStartRef = useRef(null)
+  const merchantMemoryRef = useRef({})
 
-  const isProMode = !testMode && subscriptionStatus === 'pro';
+  const navigate = useNavigate()
 
-  const allExpenses = useMemo(() => {
-    return showArchived ? expenses : expenses.filter(e => !e.archived);
-  }, [expenses, showArchived]);
-
-  const filteredExpenses = useMemo(() => {
-    if (!searchTerm.trim()) return allExpenses;
-    const term = searchTerm.toLowerCase();
-    return allExpenses.filter(expense => 
-      expense.merchant?.toLowerCase().includes(term) ||
-      expense.category?.toLowerCase().includes(term) ||
-      expense.note?.toLowerCase().includes(term)
-    );
-  }, [allExpenses, searchTerm]);
+  const allExpenses = showArchived ? expenses : expenses.filter(e => !e.archived)
+  const filteredExpenses = allExpenses.filter(expense => {
+    if (!searchTerm) return true
+    const search = searchTerm.toLowerCase()
+    return (
+      expense.merchant.toLowerCase().includes(search) ||
+      (categories.find(c => c.id === expense.category_id)?.name || '').toLowerCase().includes(search) ||
+      (expense.note || '').toLowerCase().includes(search)
+    )
+  })
 
   useEffect(() => {
     const initSession = async () => {
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-      setSession(currentSession);
-      setLoading(false);
-    };
-    initSession();
+      try {
+        const { data: { session: currentSession } } = await supabase.auth.getSession()
+        setSession(currentSession)
+        setLoading(false)
+      } catch (error) {
+        console.error('Session init error:', error)
+        setLoading(false)
+      }
+    }
+
+    initSession()
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
+      setSession(session)
+      setLoading(false)
+    })
+
+    window.addEventListener('beforeunload', () => {
+      if (sessionIdRef.current && sessionStartRef.current) {
+        const duration = Math.floor((Date.now() - sessionStartRef.current) / 1000)
+        const url = `${process.env.REACT_APP_SUPABASE_URL}/rest/v1/user_sessions?id=eq.${sessionIdRef.current}`
+        const body = JSON.stringify({
+          session_end: new Date().toISOString(),
+          duration_seconds: duration
+        })
+        navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }))
+      }
+    })
 
     return () => {
-      authListener?.subscription?.unsubscribe();
-    };
-  }, []);
+      if (authListener && authListener.subscription) {
+        authListener.subscription.unsubscribe()
+      }
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (session?.user) {
-      startSession(session.user.id);
-      loadUserRole(session.user.id);
-      loadUserProfile(session.user.id);
-      loadSubscription(session.user.email);
-      loadCategories(session.user.id);
-      loadExpenses(session.user.id);
-      logLogin(session.user.email);
-      logPageView(session.user.id);
-    }
-  }, [session]);
-
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      if (sessionIdRef.current && sessionStartRef.current) {
-        const duration = Math.floor((Date.now() - sessionStartRef.current) / 1000);
-        navigator.sendBeacon(
-          `${process.env.REACT_APP_SUPABASE_URL}/rest/v1/user_sessions?id=eq.${sessionIdRef.current}`,
-          JSON.stringify({ duration_seconds: duration })
-        );
+      loadUserRole(session.user.id)
+      loadUserProfile(session.user.id)
+      loadSubscription(session.user.email)
+      loadCategories(session.user.id)
+      loadExpenses(session.user.id)
+      startSession(session.user.id, session.user.email)
+      logLogin(session.user.email)
+      logPageView(session.user.id)
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
       }
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, []);
+    }
+  }, [session])
 
-  const startSession = async (userId) => {
+  const startSession = async (userId, email) => {
     try {
       const { data: existingSession } = await supabase
         .from('user_sessions')
-        .select('*')
+        .select('id')
         .eq('user_id', userId)
         .is('session_end', null)
-        .maybeSingle();
+        .single()
 
       if (existingSession) {
-        sessionIdRef.current = existingSession.id;
-        sessionStartRef.current = new Date(existingSession.session_start).getTime();
-        updateSessionActivity(existingSession.id);
+        sessionIdRef.current = existingSession.id
       } else {
-        const { data: newSession } = await supabase
+        const { data: newSession, error } = await supabase
           .from('user_sessions')
           .insert({
             user_id: userId,
-            email: session?.user?.email || '',
+            email: email,
             session_start: new Date().toISOString(),
             last_activity: new Date().toISOString(),
-            device_info: {
-              platform: navigator.platform,
-              user_agent: navigator.userAgent,
-              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-            }
+            device_info: navigator.userAgent
           })
           .select()
-          .single();
+          .single()
 
-        if (newSession) {
-          sessionIdRef.current = newSession.id;
-          sessionStartRef.current = Date.now();
+        if (error) {
+          console.error('Session start error:', error)
+          return
         }
+
+        sessionIdRef.current = newSession.id
+        sessionStartRef.current = Date.now()
       }
 
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      intervalRef.current = setInterval(() => {
-        if (sessionIdRef.current) {
-          updateSessionActivity(sessionIdRef.current);
-        }
-      }, 30000);
-    } catch (error) {
-      console.error('Session start error:', error);
-    }
-  };
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+      }
 
-  const updateSessionActivity = async (sessionId) => {
+      intervalRef.current = setInterval(() => {
+        updateSessionActivity()
+      }, 30000)
+
+    } catch (err) {
+      console.error('Start session error:', err)
+    }
+  }
+
+  const updateSessionActivity = async () => {
+    if (!sessionIdRef.current) return
+
     try {
       await supabase
         .from('user_sessions')
         .update({ last_activity: new Date().toISOString() })
-        .eq('id', sessionId);
-    } catch (error) {
-      console.error('Activity update error:', error);
+        .eq('id', sessionIdRef.current)
+    } catch (err) {
+      console.error('Update activity error:', err)
     }
-  };
+  }
 
   const logLogin = async (email) => {
     try {
       await supabase.from('login_logs').insert({
-        email,
-        login_time: new Date().toISOString(),
-        device_info: {
-          platform: navigator.platform,
-          user_agent: navigator.userAgent
-        }
-      });
-      console.log('App: login tracked for', email);
-    } catch (error) {
-      console.error('Login log error:', error);
+        email: email,
+        login_time: new Date().toISOString()
+      })
+      console.log('App: login tracked for', email)
+    } catch (err) {
+      console.error('Login log error:', err)
     }
-  };
+  }
 
   const logPageView = async (userId) => {
     try {
       await supabase.from('page_views').insert({
         user_id: userId,
-        page_url: window.location.pathname,
-        view_time: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error('Page view log error:', error);
+        page: '/',
+        viewed_at: new Date().toISOString()
+      })
+    } catch (err) {
+      console.error('Page view log error:', err)
     }
-  };
+  }
 
   const loadUserRole = async (userId) => {
     try {
       const { data, error } = await supabase
         .from('user_preferences')
-        .select('preferences_value')
+        .select('preference_value')
         .eq('user_id', userId)
-        .eq('preferences_type', 'role')
-        .maybeSingle();
+        .eq('preference_type', 'role')
+        .single()
 
-      if (error) throw error;
-      setUserRole(data?.preferences_value || 'user');
-    } catch (error) {
-      console.error('Load role error:', error);
-      setUserRole('user');
+      if (error) {
+        console.error('Load role error:', error)
+        setUserRole('user')
+        return
+      }
+
+      setUserRole(data?.preference_value || 'user')
+    } catch (err) {
+      console.error('Role load error:', err)
+      setUserRole('user')
     }
-  };
+  }
 
   const loadUserProfile = async (userId) => {
     try {
       const { data, error } = await supabase
         .from('user_preferences')
-        .select('preferences_type, preferences_value')
+        .select('preference_type, preference_value')
         .eq('user_id', userId)
-        .in('preferences_type', ['display_name', 'title']);
+        .in('preference_type', ['display_name', 'title'])
 
-      if (error) throw error;
-      
-      const profile = {};
-      data?.forEach(pref => {
-        profile[pref.preferences_type] = pref.preferences_value;
-      });
-      
-      setUserProfile(profile);
-      console.log('Loaded user profile:', profile);
-    } catch (error) {
-      console.error('Load profile error:', error);
-    }
-  };
-
-  const loadSubscription = async (email) => {
-    try {
-      const ceoTestEmails = ['lifeliftusa@gmail.com', 'test@example.com'];
-      if (ceoTestEmails.includes(email)) {
-        setSubscriptionStatus('pro');
-        return;
+      if (error) {
+        console.error('Load profile error:', error)
+        return
       }
 
+      const profile = {}
+      data.forEach(pref => {
+        profile[pref.preference_type] = pref.preference_value
+      })
+
+      console.log('Loaded user profile:', profile)
+      setUserProfile(profile)
+    } catch (err) {
+      console.error('Profile load error:', err)
+    }
+  }
+
+  const loadSubscription = async (email) => {
+    const ceoTestEmails = ['lifeliftusa@gmail.com']
+    if (ceoTestEmails.includes(email)) {
+      setSubscriptionStatus('pro')
+      return
+    }
+
+    try {
       const { data, error } = await supabase
         .from('subscriptions')
         .select('status')
         .eq('email', email)
-        .maybeSingle();
+        .single()
 
-      if (error) throw error;
-      setSubscriptionStatus(data?.status || 'free');
-    } catch (error) {
-      console.error('Load subscription error:', error);
-      setSubscriptionStatus('free');
+      if (error) {
+        setSubscriptionStatus('basic')
+        return
+      }
+
+      setSubscriptionStatus(data?.status || 'basic')
+    } catch (err) {
+      setSubscriptionStatus('basic')
     }
-  };
+  }
 
   const loadCategories = async (userId) => {
     try {
       const { data, error } = await supabase
         .from('categories')
         .select('*')
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .order('name')
 
-      if (error) throw error;
-      setCategories(data || []);
-    } catch (error) {
-      console.error('Load categories error:', error);
+      if (error) throw error
+      setCategories(data || [])
+    } catch (err) {
+      console.error('Load categories error:', err)
     }
-  };
+  }
 
   const loadExpenses = async (userId) => {
     try {
@@ -276,551 +296,719 @@ function MainApp() {
         .from('expenses')
         .select('*')
         .eq('user_id', userId)
-        .order('spent_at', { ascending: false });
+        .order('spent_at', { ascending: false })
 
-      if (error) throw error;
-      
-      setExpenses(data || []);
-      updateMerchantMemory(data || []);
-    } catch (error) {
-      console.error('Load expenses error:', error);
+      if (error) throw error
+
+      setExpenses(data || [])
+
+      data.forEach(expense => {
+        if (expense.merchant && expense.category_id) {
+          merchantMemoryRef.current[expense.merchant.toLowerCase()] = expense.category_id
+        }
+      })
+    } catch (err) {
+      console.error('Load expenses error:', err)
     }
-  };
+  }
 
-  const updateMerchantMemory = (expensesList) => {
-    const memory = new Map();
-    expensesList.forEach(expense => {
-      if (expense.merchant && expense.category) {
-        memory.set(expense.merchant.toLowerCase(), expense.category);
-      }
-    });
-    merchantMemoryRef.current = memory;
-  };
-
-  const suggestCategoryForMerchant = async (merchantName) => {
-    const cached = merchantMemoryRef.current.get(merchantName.toLowerCase());
-    if (cached) return cached;
-
+  const addExpense = async (expense) => {
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          messages: [{
-            role: 'user',
-            content: `Suggest a category for this merchant: ${merchantName}. Reply with just the category name (e.g., "Groceries", "Transportation", "Entertainment").`
-          }],
-          temperature: 0.3,
-          max_tokens: 20
-        })
-      });
+      let receiptUrl = null
 
-      const result = await response.json();
-      const suggestion = result.choices?.[0]?.message?.content?.trim() || 'Uncategorized';
-      merchantMemoryRef.current.set(merchantName.toLowerCase(), suggestion);
-      return suggestion;
-    } catch (error) {
-      console.error('Category suggestion error:', error);
-      return 'Uncategorized';
-    }
-  };
-
-  const handleLogin = async (email, password) => {
-    try {
-      setLoginStatus('Signing in...');
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      setLoginStatus('Login successful!');
-      setSession(data.session);
-    } catch (error) {
-      console.error('Login error:', error);
-      setLoginStatus(`Login failed: ${error.message}`);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      if (sessionIdRef.current && sessionStartRef.current) {
-        const duration = Math.floor((Date.now() - sessionStartRef.current) / 1000);
-        await supabase
-          .from('user_sessions')
-          .update({
-            session_end: new Date().toISOString(),
-            duration_seconds: duration
-          })
-          .eq('id', sessionIdRef.current);
-      }
-
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-
-      await supabase.auth.signOut();
-      setSession(null);
-      setExpenses([]);
-      setCategories([]);
-      sessionIdRef.current = null;
-      sessionStartRef.current = null;
-    } catch (error) {
-      console.error('Logout error:', error);
-    }
-  };
-
-  const addExpense = async (expenseData) => {
-    try {
-      let receiptUrl = null;
-
-      if (expenseData.receipt) {
-        const fileName = `${Date.now()}_${expenseData.receipt.name}`;
+      if (expense.receipt) {
+        const fileName = `${Date.now()}_${expense.receipt.name}`
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('receipts')
-          .upload(fileName, expenseData.receipt);
+          .upload(fileName, expense.receipt)
 
-        if (uploadError) throw uploadError;
+        if (uploadError) throw uploadError
 
         const { data: urlData } = supabase.storage
           .from('receipts')
-          .getPublicUrl(fileName);
+          .getPublicUrl(fileName)
 
-        receiptUrl = urlData.publicUrl;
+        receiptUrl = urlData.publicUrl
       }
 
-      let location = null;
+      let location = null
       if (navigator.geolocation) {
         try {
           const position = await new Promise((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject);
-          });
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 })
+          })
 
-          const { latitude, longitude } = position.coords;
+          const { latitude, longitude } = position.coords
           const geoResponse = await fetch(
             `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
-          );
-          const geoData = await geoResponse.json();
-          location = geoData.display_name || `${latitude}, ${longitude}`;
-        } catch (geoError) {
-          console.log('Geolocation error:', geoError);
+          )
+          const geoData = await geoResponse.json()
+          location = geoData.display_name || `${latitude}, ${longitude}`
+        } catch (geoErr) {
+          console.warn('Geolocation failed:', geoErr)
         }
       }
 
       const newExpense = {
         user_id: session.user.id,
-        amount: parseFloat(expenseData.amount),
-        merchant: expenseData.merchant,
-        category_id: expenseData.category,
-        spent_at: expenseData.date || new Date().toISOString(),
-        payment_method: expenseData.paymentMethod,
-        note: expenseData.notes || '',
+        amount: parseFloat(expense.amount),
+        merchant: expense.merchant,
+        category_id: expense.category_id,
+        spent_at: expense.spent_at || new Date().toISOString(),
+        payment_method: expense.payment_method || 'credit_card',
+        note: expense.note || null,
         receipt_image_url: receiptUrl,
         location: location,
         archived: false
-      };
+      }
 
-      const { error } = await supabase.from('expenses').insert([newExpense]);
+      const { error } = await supabase.from('expenses').insert([newExpense])
 
-      if (error) throw error;
+      if (error) throw error
 
-      await loadExpenses(session.user.id);
-    } catch (error) {
-      console.error('Add expense error:', error);
-      alert(`Failed to add expense: ${error.message}`);
+      await loadExpenses(session.user.id)
+      return { success: true }
+    } catch (err) {
+      console.error('Add expense error:', err)
+      return { success: false, error: err.message }
     }
-  };
+  }
 
   const updateExpense = async (id, updates) => {
     try {
       const { error } = await supabase
         .from('expenses')
         .update(updates)
-        .eq('id', id);
+        .eq('id', id)
 
-      if (error) throw error;
-      await loadExpenses(session.user.id);
-    } catch (error) {
-      console.error('Update expense error:', error);
+      if (error) throw error
+
+      await loadExpenses(session.user.id)
+      return { success: true }
+    } catch (err) {
+      console.error('Update expense error:', err)
+      return { success: false, error: err.message }
     }
-  };
+  }
 
   const archiveExpense = async (id) => {
-    try {
-      const expense = expenses.find(e => e.id === id);
-      setPendingUndo({ action: 'archive', expense });
+    const expense = expenses.find(e => e.id === id)
+    if (!expense) return
 
+    try {
       const { error } = await supabase
         .from('expenses')
         .update({ archived: true })
-        .eq('id', id);
+        .eq('id', id)
 
-      if (error) throw error;
-      await loadExpenses(session.user.id);
+      if (error) throw error
 
-      setTimeout(() => setPendingUndo(null), 5000);
-    } catch (error) {
-      console.error('Archive expense error:', error);
+      setPendingUndo({ action: 'archive', expense })
+      await loadExpenses(session.user.id)
+
+      setTimeout(() => {
+        setPendingUndo(null)
+      }, 5000)
+    } catch (err) {
+      console.error('Archive error:', err)
     }
-  };
+  }
 
   const deleteExpense = async (id) => {
-    try {
-      const expense = expenses.find(e => e.id === id);
-      setPendingUndo({ action: 'delete', expense });
+    const expense = expenses.find(e => e.id === id)
+    if (!expense) return
 
+    try {
       const { error } = await supabase
         .from('expenses')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
 
-      if (error) throw error;
-      await loadExpenses(session.user.id);
+      if (error) throw error
 
-      setTimeout(() => setPendingUndo(null), 5000);
-    } catch (error) {
-      console.error('Delete expense error:', error);
+      setPendingUndo({ action: 'delete', expense })
+      await loadExpenses(session.user.id)
+
+      setTimeout(() => {
+        setPendingUndo(null)
+      }, 5000)
+    } catch (err) {
+      console.error('Delete error:', err)
     }
-  };
+  }
 
   const undoAction = async () => {
-    if (!pendingUndo) return;
+    if (!pendingUndo) return
 
     try {
       if (pendingUndo.action === 'archive') {
-        const { error } = await supabase
+        await supabase
           .from('expenses')
           .update({ archived: false })
-          .eq('id', pendingUndo.expense.id);
-
-        if (error) throw error;
+          .eq('id', pendingUndo.expense.id)
       } else if (pendingUndo.action === 'delete') {
-        const { error } = await supabase
-          .from('expenses')
-          .insert([pendingUndo.expense]);
-
-        if (error) throw error;
+        await supabase.from('expenses').insert([pendingUndo.expense])
       }
 
-      await loadExpenses(session.user.id);
-      setPendingUndo(null);
-    } catch (error) {
-      console.error('Undo error:', error);
+      setPendingUndo(null)
+      await loadExpenses(session.user.id)
+    } catch (err) {
+      console.error('Undo error:', err)
     }
-  };
+  }
 
   const openReceipt = (url) => {
-    window.open(url, '_blank');
-  };
+    window.open(url, '_blank')
+  }
 
-  const handleImportComplete = (transactions) => {
-    setParsedTransactions(transactions);
-  };
+  const handleImport = async (file) => {
+    const text = await file.text()
+    const lines = text.split('\n').filter(line => line.trim())
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
 
-  const handleImportConfirm = async (confirmedTransactions) => {
-    try {
-      const expensesToInsert = confirmedTransactions.map(t => ({
-        user_id: session.user.id,
-        amount: parseFloat(t.amount),
-        merchant: t.merchant,
-        category_id: t.category,
-        spent_at: t.date,
-        payment_method: t.paymentMethod || 'Unknown',
-        note: t.notes || '',
-        archived: false
-      }));
+    const transactions = lines.slice(1).map(line => {
+      const values = line.split(',').map(v => v.trim())
+      const obj = {}
+      headers.forEach((h, i) => {
+        obj[h] = values[i] || ''
+      })
+      return obj
+    })
 
-      const { error } = await supabase.from('expenses').insert(expensesToInsert);
+    setParsedTransactions(transactions)
+    setShowImport(true)
+  }
 
-      if (error) throw error;
-
-      await loadExpenses(session.user.id);
-      setParsedTransactions([]);
-      setShowImport(false);
-      alert('Import successful!');
-    } catch (error) {
-      console.error('Import confirm error:', error);
-      alert(`Import failed: ${error.message}`);
+  const handleImportConfirm = async (mappedExpenses) => {
+    for (const exp of mappedExpenses) {
+      await addExpense(exp)
     }
-  };
-
-  const handleImportCancel = () => {
-    setParsedTransactions([]);
-    setShowImport(false);
-  };
+    setShowImport(false)
+    setParsedTransactions([])
+  }
 
   const handleExport = () => {
-    try {
-      const csvHeader = 'Date,Merchant,Category,Amount,Payment Method,Notes\n';
-      const csvRows = filteredExpenses.map(e => 
-        `${e.spent_at},${e.merchant},${e.category},${e.amount},${e.payment_method || ''},${e.note || ''}`
-      ).join('\n');
+    const headers = ['Date', 'Merchant', 'Category', 'Amount', 'Payment Method', 'Notes']
+    const rows = filteredExpenses.map(e => [
+      new Date(e.spent_at).toLocaleDateString(),
+      e.merchant,
+      categories.find(c => c.id === e.category_id)?.name || '',
+      e.amount,
+      e.payment_method,
+      e.note || ''
+    ])
 
-      const csvContent = csvHeader + csvRows;
-      const blob = new Blob([csvContent], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `expenses_${new Date().toISOString().split('T')[0]}.csv`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Export error:', error);
+    const csv = [headers, ...rows].map(row => row.join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `expenses_${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+  }
+
+  const handleLogout = async () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
     }
-  };
 
-  const fileToBase64 = (file) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  };
+    if (sessionIdRef.current && sessionStartRef.current) {
+      const duration = Math.floor((Date.now() - sessionStartRef.current) / 1000)
+      try {
+        await supabase
+          .from('user_sessions')
+          .update({
+            session_end: new Date().toISOString(),
+            duration_seconds: duration
+          })
+          .eq('id', sessionIdRef.current)
+      } catch (err) {
+        console.error('Session end error:', err)
+      }
+    }
+
+    await supabase.auth.signOut()
+    setSession(null)
+  }
 
   const processReceiptWithOCR = async (file) => {
     try {
-      const base64Image = await fileToBase64(file);
+      const base64 = await new Promise((resolve) => {
+        const reader = new FileReader()
+        reader.onloadend = () => resolve(reader.result.split(',')[1])
+        reader.readAsDataURL(file)
+      })
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
+          Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
         },
         body: JSON.stringify({
           model: 'gpt-4o',
-          messages: [{
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: 'Extract the following from this receipt: merchant name, total amount, date, and line items. Return as JSON: {"merchant": "", "amount": 0, "date": "", "items": []}'
-              },
-              {
-                type: 'image_url',
-                image_url: { url: `data:image/jpeg;base64,${base64Image}` }
-              }
-            ]
-          }],
-          max_tokens: 500
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: 'Extract: merchant name, total amount, date (YYYY-MM-DD). Return JSON: {"merchant":"...","amount":0.00,"date":"YYYY-MM-DD"}'
+                },
+                {
+                  type: 'image_url',
+                  image_url: { url: `data:image/jpeg;base64,${base64}` }
+                }
+              ]
+            }
+          ],
+          max_tokens: 300
         })
-      });
+      })
 
-      const result = await response.json();
-      const content = result.choices?.[0]?.message?.content || '{}';
-      
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      const parsedData = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
-
-      return parsedData;
-    } catch (error) {
-      console.error('OCR processing error:', error);
-      throw error;
+      const data = await response.json()
+      const content = data.choices[0].message.content
+      const jsonMatch = content.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0])
+      }
+      return null
+    } catch (err) {
+      console.error('OCR error:', err)
+      return null
     }
-  };
+  }
 
-  const parseNaturalDate = (dateStr) => {
-    const today = new Date();
-    const lower = dateStr.toLowerCase();
+  const parseNaturalDate = (input) => {
+    const today = new Date()
+    const lower = input.toLowerCase()
 
-    if (lower === 'today') return today.toISOString().split('T')[0];
+    if (lower === 'today') return today.toISOString()
     if (lower === 'yesterday') {
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-      return yesterday.toISOString().split('T')[0];
+      const yesterday = new Date(today)
+      yesterday.setDate(today.getDate() - 1)
+      return yesterday.toISOString()
     }
 
-    return dateStr;
-  };
+    const daysAgoMatch = lower.match(/(\d+)\s*days?\s*ago/)
+    if (daysAgoMatch) {
+      const days = parseInt(daysAgoMatch[1])
+      const date = new Date(today)
+      date.setDate(today.getDate() - days)
+      return date.toISOString()
+    }
+
+    try {
+      return new Date(input).toISOString()
+    } catch {
+      return today.toISOString()
+    }
+  }
+
+  const suggestCategoryForMerchant = async (merchant) => {
+    const lowerMerchant = merchant.toLowerCase()
+
+    if (merchantMemoryRef.current[lowerMerchant]) {
+      return merchantMemoryRef.current[lowerMerchant]
+    }
+
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'system',
+              content: 'You suggest expense categories. Reply with ONLY the category name from: Food & Dining, Transportation, Shopping, Entertainment, Bills & Utilities, Health & Fitness, Travel, Other.'
+            },
+            {
+              role: 'user',
+              content: `Merchant: ${merchant}`
+            }
+          ],
+          max_tokens: 20
+        })
+      })
+
+      const data = await response.json()
+      const suggestedCategory = data.choices[0].message.content.trim()
+      const match = categories.find(c => c.name.toLowerCase() === suggestedCategory.toLowerCase())
+
+      if (match) {
+        merchantMemoryRef.current[lowerMerchant] = match.id
+        return match.id
+      }
+    } catch (err) {
+      console.error('Category suggestion error:', err)
+    }
+
+    return categories[0]?.id || null
+  }
 
   const handleAICommand = async (command) => {
-    try {
-      if (command.action === 'add_expense') {
-        await addExpense({
-          amount: command.amount,
-          merchant: command.merchant,
-          category: command.category || await suggestCategoryForMerchant(command.merchant),
-          date: parseNaturalDate(command.date || new Date().toISOString()),
-          paymentMethod: command.payment_method || 'Unknown',
-          notes: command.notes || ''
-        });
-        return { success: true, message: 'Expense added successfully' };
-      }
+    const { action, data } = command
 
-      if (command.action === 'update_expense') {
-        await updateExpense(command.id, command.updates);
-        return { success: true, message: 'Expense updated successfully' };
-      }
-
-      if (command.action === 'search') {
-        setSearchTerm(command.query);
-        return { success: true, results: filteredExpenses };
-      }
-
-      if (command.action === 'export') {
-        handleExport();
-        return { success: true, message: 'Export started' };
-      }
-
-      return { success: false, message: 'Unknown command' };
-    } catch (error) {
-      console.error('AI command error:', error);
-      return { success: false, message: error.message };
+    if (action === 'add_expense') {
+      const result = await addExpense(data)
+      return result.success ? { success: true, message: 'Expense added!' } : { success: false, message: result.error }
     }
-  };
+
+    if (action === 'update_expense') {
+      const result = await updateExpense(data.id, data.updates)
+      return result.success ? { success: true, message: 'Expense updated!' } : { success: false, message: result.error }
+    }
+
+    if (action === 'search') {
+      setSearchTerm(data.term)
+      return { success: true, message: `Searching for: ${data.term}` }
+    }
+
+    if (action === 'export') {
+      handleExport()
+      return { success: true, message: 'Expenses exported!' }
+    }
+
+    return { success: false, message: 'Unknown command' }
+  }
 
   const calculateAIInsights = () => {
-    if (!isProMode) return null;
+    const now = new Date()
+    const currentMonth = now.getMonth()
+    const currentYear = now.getFullYear()
 
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
+    const thisMonthExpenses = allExpenses.filter(e => {
+      const expenseDate = new Date(e.spent_at)
+      return expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear
+    })
 
-    const thisMonthExpenses = expenses.filter(e => {
-      const expenseDate = new Date(e.spent_at);
-      return expenseDate.getMonth() === currentMonth && 
-             expenseDate.getFullYear() === currentYear &&
-             !e.archived;
-    });
+    const totalSpent = thisMonthExpenses.reduce((sum, e) => sum + e.amount, 0)
+    const avgDaily = totalSpent / now.getDate()
+    const daysLeft = new Date(currentYear, currentMonth + 1, 0).getDate() - now.getDate()
+    const forecastTotal = totalSpent + (avgDaily * daysLeft)
 
-    const total = thisMonthExpenses.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
-    const avgDaily = total / now.getDate();
-    const daysLeft = new Date(currentYear, currentMonth + 1, 0).getDate() - now.getDate();
-    const forecastTotal = total + (avgDaily * daysLeft);
-
-    const merchantCounts = {};
+    const merchantCounts = {}
     thisMonthExpenses.forEach(e => {
-      merchantCounts[e.merchant] = (merchantCounts[e.merchant] || 0) + 1;
-    });
+      merchantCounts[e.merchant] = (merchantCounts[e.merchant] || 0) + 1
+    })
     const recurringMerchants = Object.entries(merchantCounts)
       .filter(([_, count]) => count >= 2)
-      .map(([merchant]) => merchant);
+      .map(([merchant]) => merchant)
 
-    const categoryTotals = {};
+    const categoryTotals = {}
     thisMonthExpenses.forEach(e => {
-      categoryTotals[e.category] = (categoryTotals[e.category] || 0) + parseFloat(e.amount || 0);
-    });
+      const catName = categories.find(c => c.id === e.category_id)?.name || 'Other'
+      categoryTotals[catName] = (categoryTotals[catName] || 0) + e.amount
+    })
     const topCategories = Object.entries(categoryTotals)
       .sort(([, a], [, b]) => b - a)
       .slice(0, 3)
-      .map(([cat, amt]) => ({ category: cat, amount: amt }));
+      .map(([name, amount]) => ({ name, amount }))
 
     return {
-      forecastTotal: forecastTotal.toFixed(2),
+      forecastTotal,
       recurringMerchants,
       topCategories
-    };
-  };
+    }
+  }
 
-  const aiInsights = calculateAIInsights();
-  const isAdmin = userRole === 'admin' || session?.user?.email === 'lifeliftusa@gmail.com';
+  const isProMode = !testMode && subscriptionStatus === 'pro'
+  const aiInsights = isProMode ? calculateAIInsights() : null
 
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <p>Loading...</p>
       </div>
-    );
+    )
   }
 
   if (!session) {
-    return <Login onLogin={handleLogin} status={loginStatus} />;
+    return (
+      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
+        <Login setLoginStatus={setLoginStatus} loginStatus={loginStatus} />
+      </div>
+    )
   }
 
   return (
-    <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h1>Nova Expense Tracker</h1>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          {isAdmin && (
-            <>
-              <button 
-                onClick={() => setTestMode(!testMode)}
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', padding: '20px' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+        <div style={{
+          background: 'white',
+          borderRadius: '16px',
+          padding: '30px',
+          boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
+          marginBottom: '20px'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <h1 style={{ margin: 0, fontSize: '32px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+              Nova Expense Tracker
+            </h1>
+
+            {userProfile && userProfile.display_name && (
+              <div style={{
+                padding: '12px 20px',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                borderRadius: '12px',
+                color: 'white',
+                fontWeight: 'bold',
+                fontSize: '16px'
+              }}>
+                Hello, {userProfile.display_name}{userProfile.title ? ` - ${userProfile.title}` : ''}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              {userRole === 'admin' && (
+                <>
+                  <button
+                    onClick={() => setTestMode(!testMode)}
+                    style={{
+                      padding: '10px 15px',
+                      background: testMode ? '#10b981' : '#6b7280',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    {testMode ? '✅ PRO Mode' : '⚙️ Basic Mode'}
+                  </button>
+                  <button
+                    onClick={() => navigate('/login-history')}
+                    style={{
+                      padding: '10px 15px',
+                      background: '#3b82f6',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    📊 Login History
+                  </button>
+                  <button
+                    onClick={() => navigate('/analytics')}
+                    style={{
+                      padding: '10px 15px',
+                      background: '#8b5cf6',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    📈 Analytics
+                  </button>
+                </>
+              )}
+
+              <button onClick={() => setShowImport(true)} style={{ padding: '10px 15px', background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>
+                📥 Import
+              </button>
+              <button onClick={handleExport} style={{ padding: '10px 15px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>
+                📤 Export
+              </button>
+              <button onClick={handleLogout} style={{ padding: '10px 15px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>
+                Logout
+              </button>
+            </div>
+          </div>
+
+          {!isProMode && (
+            <div style={{
+              background: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)',
+              padding: '15px',
+              borderRadius: '12px',
+              marginBottom: '20px',
+              color: 'white',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <span style={{ fontWeight: 'bold' }}>⚡ Unlock PRO features: AI Insights, Voice Commands, Predictions & More!</span>
+              <button
+                onClick={() => setShowUpgrade(true)}
                 style={{
-                  padding: '8px 16px',
-                  backgroundColor: testMode ? '#6c757d' : '#28a745',
-                  color: 'white',
+                  padding: '10px 20px',
+                  background: 'white',
+                  color: '#f59e0b',
                   border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer'
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
                 }}
               >
-                {testMode ? 'Basic Mode' : 'PRO Mode'}
+                Upgrade to PRO
               </button>
-              <button onClick={() => navigate('/login-history')} style={{ padding: '8px 16px', cursor: 'pointer' }}>
-                Login History
-              </button>
-              <button onClick={() => navigate('/analytics')} style={{ padding: '8px 16px', cursor: 'pointer' }}>
-                Analytics
-              </button>
-            </>
+            </div>
           )}
-          <button onClick={() => setShowImport(true)} style={{ padding: '8px 16px', cursor: 'pointer' }}>
-            Import
-          </button>
-          <button onClick={handleExport} style={{ padding: '8px 16px', cursor: 'pointer' }}>
-            Export
-          </button>
-          <button onClick={handleLogout} style={{ padding: '8px 16px', cursor: 'pointer' }}>
-            Logout
-          </button>
+
+          {isProMode && aiInsights && (
+            <div style={{
+              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              padding: '20px',
+              borderRadius: '12px',
+              marginBottom: '20px',
+              color: 'white'
+            }}>
+              <h3 style={{ marginTop: 0 }}>🤖 AI Insights (PRO)</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px' }}>
+                <div>
+                  <p style={{ margin: '5px 0', fontWeight: 'bold' }}>Forecast This Month:</p>
+                  <p style={{ margin: 0, fontSize: '24px' }}>${aiInsights.forecastTotal.toFixed(2)}</p>
+                </div>
+                <div>
+                  <p style={{ margin: '5px 0', fontWeight: 'bold' }}>Recurring Merchants:</p>
+                  <p style={{ margin: 0 }}>{aiInsights.recurringMerchants.join(', ') || 'None'}</p>
+                </div>
+                <div>
+                  <p style={{ margin: '5px 0', fontWeight: 'bold' }}>Top Categories:</p>
+                  {aiInsights.topCategories.map(cat => (
+                    <p key={cat.name} style={{ margin: '2px 0' }}>{cat.name}: ${cat.amount.toFixed(2)}</p>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <ChatAssistant
+            expenses={allExpenses}
+            categories={categories}
+            isProMode={isProMode}
+            onUpgradeToPro={() => setShowUpgrade(true)}
+            onAICommand={handleAICommand}
+            userId={session.user.id}
+          />
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+          <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+            <AddExpenseForm
+              categories={categories}
+              onAddExpense={addExpense}
+              onProcessReceipt={processReceiptWithOCR}
+              onParseDate={parseNaturalDate}
+              onSuggestCategory={suggestCategoryForMerchant}
+              isProMode={isProMode}
+            />
+          </div>
+
+          <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+            <MonthlySummary expenses={allExpenses} categories={categories} />
+          </div>
+        </div>
+
+        <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            <input
+              type="text"
+              placeholder="Search expenses..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{
+                padding: '10px',
+                border: '2px solid #e5e7eb',
+                borderRadius: '8px',
+                flex: 1,
+                marginRight: '10px'
+              }}
+            />
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={(e) => setShowArchived(e.target.checked)}
+              />
+              Show Archived
+            </label>
+          </div>
+
+          <ExpenseList
+            expenses={filteredExpenses}
+            categories={categories}
+            onUpdate={updateExpense}
+            onArchive={archiveExpense}
+            onDelete={deleteExpense}
+            onOpenReceipt={openReceipt}
+          />
+
+          {pendingUndo && (
+            <div style={{
+              position: 'fixed',
+              bottom: '20px',
+              right: '20px',
+              background: '#1f2937',
+              color: 'white',
+              padding: '15px 20px',
+              borderRadius: '12px',
+              display: 'flex',
+              gap: '15px',
+              alignItems: 'center',
+              boxShadow: '0 4px 6px rgba(0,0,0,0.2)'
+            }}>
+              <span>{pendingUndo.action === 'archive' ? 'Expense archived' : 'Expense deleted'}</span>
+              <button
+                onClick={undoAction}
+                style={{
+                  padding: '8px 15px',
+                  background: '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                Undo
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-    {userProfile && userProfile.display_name && (
-        <p style={{ marginBottom: '20px', fontSize: '18px', color: '#333' }}>
-          <strong>Hello, {userProfile.display_name}</strong>
-          {userProfile.title && <span style={{ color: '#666' }}> - {userProfile.title}</span>}
-        </p>
-      )}
-
-      {pendingUndo && (
-        <div style={{ 
-          padding: '10px', 
-          backgroundColor: '#fff3cd', 
-          marginBottom: '20px',
-          borderRadius: '4px',
+      {showImport && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.7)',
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center'
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000
         }}>
-          <span>Expense {pendingUndo.action}d</span>
-          <button onClick={undoAction} style={{ padding: '5px 15px', cursor: 'pointer' }}>
-            Undo
-          </button>
-        </div>
-      )}
-
-      {session?.user && (
-        <div style={{ marginBottom: '20px', width: '100%' }}>
-          <ChatAssistant 
-            userId={session?.user?.id}
-            userProfile={userProfile}
-            isProMode={isProMode}
-            onCommand={handleAICommand}
-            onUpgradeToPro={() => setShowUpgrade(true)}
-            expenses={expenses}
-          />
-        </div>
-      )}
-
-      {isProMode && aiInsights && (
-        <div style={{ 
-          padding: '20px', 
-          backgroundColor: '#e7f3ff', 
-          marginBottom: '20px',
-          borderRadius: '8px'
-        }}>
-          <h3>AI Insights (PRO)</h3>
-          <p><strong>Forecast Total:</strong> ${aiInsights.forecastTotal}</p>
-          <p><strong>Recurring Merchants:</strong> {aiInsights.recurringMerchants.join(', ') || 'None'}</p>
-          <div>
-            <strong>Top Categories:</strong>
-            {aiInsights.topCategories.map((cat, i) => (
-              <div key={i}>• {cat.category}: ${cat.amount.toFixed(2)}</div>
-            ))}
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            padding: '30px',
+            maxWidth: '800px',
+            width: '90%',
+            maxHeight: '80vh',
+            overflow: 'auto'
+          }}>
+            {parsedTransactions.length === 0 ? (
+              <FileImport onFileSelect={handleImport} onClose={() => setShowImport(false)} />
+            ) : (
+              <ImportPreview
+                transactions={parsedTransactions}
+                categories={categories}
+                onConfirm={handleImportConfirm}
+                onCancel={() => {
+                  setShowImport(false)
+                  setParsedTransactions([])
+                }}
+              />
+            )}
           </div>
         </div>
       )}
@@ -832,116 +1020,59 @@ function MainApp() {
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
+          background: 'rgba(0,0,0,0.7)',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
           zIndex: 1000
         }}>
           <div style={{
-            backgroundColor: 'white',
-            padding: '30px',
-            borderRadius: '8px',
-            maxWidth: '400px'
+            background: 'white',
+            borderRadius: '16px',
+            padding: '40px',
+            maxWidth: '500px',
+            textAlign: 'center'
           }}>
-            <h2>Upgrade to PRO</h2>
-            <p>Get AI insights, advanced analytics, and more for $9.99/month</p>
-            <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-              <button 
-                onClick={() => {
-                  alert('Stripe integration coming soon!');
-                  setShowUpgrade(false);
-                }}
-                style={{
-                  padding: '10px 20px',
-                  backgroundColor: '#007bff',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer'
-                }}
-              >
-                Upgrade Now
-              </button>
-              <button 
-                onClick={() => setShowUpgrade(false)}
-                style={{ padding: '10px 20px', cursor: 'pointer' }}
-              >
-                Cancel
-              </button>
-            </div>
+            <h2 style={{ marginTop: 0 }}>🚀 Upgrade to PRO</h2>
+            <p style={{ fontSize: '18px', color: '#6b7280' }}>
+              Unlock AI Insights, Voice Commands, Smart Predictions, and more!
+            </p>
+            <p style={{ fontSize: '32px', fontWeight: 'bold', color: '#667eea', margin: '20px 0' }}>
+              $9.99/month
+            </p>
+            <button
+              onClick={() => setShowUpgrade(false)}
+              style={{
+                padding: '15px 30px',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: '16px'
+              }}
+            >
+              Coming Soon!
+            </button>
+            <button
+              onClick={() => setShowUpgrade(false)}
+              style={{
+                display: 'block',
+                margin: '15px auto 0',
+                background: 'none',
+                border: 'none',
+                color: '#6b7280',
+                cursor: 'pointer'
+              }}
+            >
+              Maybe Later
+            </button>
           </div>
         </div>
       )}
-
-      {showImport && (
-        <div style={{ marginBottom: '20px' }}>
-          <FileImport
-            onImportComplete={handleImportComplete}
-            onProcessReceipt={processReceiptWithOCR}
-          />
-          <button 
-            onClick={() => setShowImport(false)}
-            style={{ marginTop: '10px', padding: '8px 16px', cursor: 'pointer' }}
-          >
-            Close Import
-          </button>
-        </div>
-      )}
-
-      {parsedTransactions.length > 0 && (
-        <ImportPreview
-          transactions={parsedTransactions}
-          onConfirm={handleImportConfirm}
-          onCancel={handleImportCancel}
-        />
-      )}
-
-      <AddExpenseForm
-        onAddExpense={addExpense}
-        categories={categories}
-        onSuggestCategory={suggestCategoryForMerchant}
-      />
-
-      <MonthlySummary expenses={allExpenses} />
-
-      <div style={{ marginBottom: '20px' }}>
-        <input
-          type="text"
-          placeholder="Search expenses..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          style={{ 
-            width: '100%', 
-            padding: '10px',
-            fontSize: '16px',
-            border: '1px solid #ddd',
-            borderRadius: '4px'
-          }}
-        />
-      </div>
-
-      <div style={{ marginBottom: '20px' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={showArchived}
-            onChange={(e) => setShowArchived(e.target.checked)}
-          />
-          Show Archived Expenses
-        </label>
-      </div>
-
-      <ExpenseList
-        expenses={filteredExpenses}
-        onUpdate={updateExpense}
-        onArchive={archiveExpense}
-        onDelete={deleteExpense}
-        onOpenReceipt={openReceipt}
-        categories={categories}
-      />
     </div>
-  );
+  )
 }
 
 function App() {
@@ -953,7 +1084,7 @@ function App() {
         <Route path="/analytics" element={<AnalyticsPage />} />
       </Routes>
     </Router>
-  );
+  )
 }
 
-export default App;
+export default App
