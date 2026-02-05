@@ -56,9 +56,6 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
       agentRef.current = new NovaAgent(memoryRef.current, tools, true)
 
-      setIsInitialized(true)
-      console.log('✅ Nova initialized')
-
       const { data, error } = await supabase
         .from('user_preferences')
         .select('preference_value')
@@ -69,20 +66,24 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       if (!error && data) {
         setVoiceGreetingEnabled(data.preference_value === 'true')
       }
+
+      setIsInitialized(true)
+      console.log('✅ Nova initialized')
+      
+      // Greet after a short delay to ensure DOM is ready for audio
+      if (isProMode && (error || !data || data.preference_value === 'true')) {
+        setTimeout(() => {
+          const displayName = memoryRef.current?.preferences?.display_name || memoryRef.current?.getNickname() || 'friend'
+          const title = memoryRef.current?.preferences?.title
+          const greeting = title ? `Hello ${displayName}, ${title}!` : displayName !== 'friend' ? `Hello ${displayName}!` : 'Hello!'
+          console.log('👋 Greeting:', greeting)
+          speak(greeting)
+        }, 1000)
+      }
     }
 
     initNova()
-  }, [userId, onAICommand])
-
-  useEffect(() => {
-    if (isInitialized && isProMode && voiceGreetingEnabled && memoryRef.current && !hasGreeted) {
-      const displayName = memoryRef.current.preferences.display_name || memoryRef.current.getNickname()
-      const title = memoryRef.current.preferences.title
-      const greeting = title ? `Hello ${displayName}, ${title}!` : `Hello ${displayName}!`
-      speak(greeting)
-      setHasGreeted(true)
-    }
-  }, [isInitialized, isProMode, voiceGreetingEnabled])
+  }, [userId, onAICommand, isProMode])
 
   useEffect(() => {
     if (isProMode && !profileLoadedRef.current && agentRef.current) {
@@ -154,7 +155,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
   }
 
   const speak = async (text) => {
-    if (!isProMode || !voiceGreetingEnabled) return
+    if (!voiceGreetingEnabled) return
 
     try {
       setIsSpeaking(true)
