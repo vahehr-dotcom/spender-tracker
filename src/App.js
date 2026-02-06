@@ -104,11 +104,15 @@ function MainApp() {
 
   useEffect(() => {
     if (session?.user) {
-      loadUserRole(session.user.id)
-      loadUserProfile(session.user.id)
-      loadSubscription(session.user.email)
-      loadCategories(session.user.id)
-      loadExpenses(session.user.id)
+      // Load all user data in parallel
+      Promise.all([
+        loadUserRole(session.user.id),
+        loadUserProfile(session.user.id),
+        loadSubscription(session.user.email),
+        loadCategories(session.user.id),
+        loadExpenses(session.user.id)
+      ])
+      
       startSession(session.user.id, session.user.email)
       logLogin(session.user.email)
       logPageView(session.user.id)
@@ -273,8 +277,9 @@ function MainApp() {
   }
 
   const loadSubscription = async (email) => {
-    const ceoTestEmails = ['lifeliftusa@gmail.com']
-    if (ceoTestEmails.includes(email)) {
+    // CEO and testers get PRO
+    const proEmails = ['lifeliftusa@gmail.com', 'awillie2006@gmail.com', 'sako3000@gmail.com']
+    if (proEmails.includes(email)) {
       setSubscriptionStatus('pro')
       return
     }
@@ -773,27 +778,31 @@ function MainApp() {
               Nova Expense Tracker
             </h1>
 
-            {userProfile && userProfile.display_name && (
-              <div style={{
-                padding: '12px 20px',
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                borderRadius: '12px',
-                color: 'white',
-                fontWeight: 'bold',
-                fontSize: '16px'
-              }}>
-                Hello, {userProfile.display_name}{userProfile.title ? ` - ${userProfile.title}` : ''}
-              </div>
-            )}
+            {/* Greeting for ALL users - centered */}
+            <div style={{
+              padding: '12px 20px',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              borderRadius: '12px',
+              color: 'white',
+              fontWeight: 'bold',
+              fontSize: '16px',
+              textAlign: 'center'
+            }}>
+              {userProfile && userProfile.display_name ? (
+                <>Hello, {userProfile.display_name}{userProfile.title ? ` - ${userProfile.title}` : ''}</>
+              ) : (
+                <>Hello, {session.user.email}</>
+              )}
+            </div>
 
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              {userRole === 'admin' && (
+              {(userRole === 'admin' || ['awillie2006@gmail.com', 'sako3000@gmail.com'].includes(session.user.email)) && (
                 <>
                   <button
                     onClick={() => setTestMode(!testMode)}
                     style={{
                       padding: '10px 15px',
-                      background: testMode ? '#10b981' : '#6b7280',
+                      background: testMode ? '#6b7280' : '#10b981',
                       color: 'white',
                       border: 'none',
                       borderRadius: '8px',
@@ -801,7 +810,7 @@ function MainApp() {
                       fontWeight: 'bold'
                     }}
                   >
-                    {testMode ? '✅ PRO Mode' : '⚙️ Basic Mode'}
+                    {testMode ? '⚙️ Basic Mode' : '✅ PRO Mode'}
                   </button>
                   <button
                     onClick={() => navigate('/login-history')}
@@ -873,12 +882,21 @@ function MainApp() {
             </div>
           )}
 
+          <ChatAssistant
+            expenses={allExpenses}
+            categories={categories}
+            isProMode={isProMode}
+            onUpgradeToPro={() => setShowUpgrade(true)}
+            onAICommand={handleAICommand}
+            userId={session.user.id}
+          />
+
           {isProMode && aiInsights && (
             <div style={{
               background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
               padding: '20px',
               borderRadius: '12px',
-              marginBottom: '20px',
+              marginTop: '20px',
               color: 'white'
             }}>
               <h3 style={{ marginTop: 0 }}>🤖 AI Insights (PRO)</h3>
@@ -900,15 +918,6 @@ function MainApp() {
               </div>
             </div>
           )}
-
-          <ChatAssistant
-            expenses={allExpenses}
-            categories={categories}
-            isProMode={isProMode}
-            onUpgradeToPro={() => setShowUpgrade(true)}
-            onAICommand={handleAICommand}
-            userId={session.user.id}
-          />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
