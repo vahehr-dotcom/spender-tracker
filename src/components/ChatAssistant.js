@@ -260,7 +260,40 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
           categories: categoriesRef.current
         })
 
-        response = agentResponse.response || agentResponse.message || 'Done!'
+        // If agent handled a command, show success message
+        if (agentResponse && agentResponse.handled) {
+          response = agentResponse.response || agentResponse.message || 'Task completed successfully!'
+        } else {
+          // Agent couldn't handle it - fall back to OpenAI chat
+          const systemPrompt = agentRef.current.buildSystemPrompt({
+            expenses: expensesRef.current,
+            categories: categoriesRef.current
+          })
+
+          const conversationHistory = memoryRef.current.getConversationHistory()
+
+          const apiMessages = [
+            { role: 'system', content: systemPrompt },
+            ...conversationHistory.map(msg => ({ role: msg.role, content: msg.content })),
+            { role: 'user', content: userMessage }
+          ]
+
+          const apiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
+            },
+            body: JSON.stringify({
+              model: 'gpt-4o',
+              messages: apiMessages,
+              max_tokens: 500
+            })
+          })
+
+          const data = await apiResponse.json()
+          response = data.choices[0].message.content
+        }
       } else {
         const systemPrompt = `You are Nova, a friendly AI assistant for expense tracking. Be helpful and concise.${memoryRef.current.buildMemoryContext()}`
 
