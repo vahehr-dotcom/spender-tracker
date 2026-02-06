@@ -74,8 +74,8 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       setIsInitialized(true)
       console.log('✅ Nova initialized')
       
-      // Greet ONCE per page session
-      if (isProMode && !hasGreetedGlobally && (error || !data || data.preference_value === 'true')) {
+      // Greet ONCE per page session (removed isProMode check)
+      if (!hasGreetedGlobally && (error || !data || data.preference_value === 'true')) {
         hasGreetedGlobally = true
         setTimeout(() => {
           const displayName = memoryRef.current?.preferences?.display_name || memoryRef.current?.getNickname() || 'friend'
