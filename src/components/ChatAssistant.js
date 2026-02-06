@@ -80,8 +80,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
         setTimeout(() => {
           const displayName = memoryRef.current?.preferences?.display_name || memoryRef.current?.getNickname() || 'friend'
           const title = memoryRef.current?.preferences?.title
-         const greeting = title ? `Hello ${displayName}. ${title}.` : ...
- displayName !== 'friend' ? `Hello ${displayName}!` : 'Hello!'
+          const greeting = title ? `Hello ${displayName}. ${title}.` : (displayName !== 'friend' ? `Hello ${displayName}!` : 'Hello!')
           console.log('👋 Greeting:', greeting)
           speak(greeting)
         }, 1000)
