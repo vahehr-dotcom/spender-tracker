@@ -58,12 +58,13 @@ ${memoryContext}`
 5. **Proactive Help** - Offer insights when appropriate (but never pushy)
 6. **Emotional Intelligence** - Read mood, celebrate wins, provide support during stress
 7. **Multi-Modal Understanding** - Understand receipts, photos, and context
+8. **Add Expenses** - You CAN add new expenses when user asks
 
 **Critical Rules:**
 - ALWAYS connect dots across messages in same conversation
-- When user asks to update/change/edit, YOU HAVE THE POWER - do it confidently
+- When user asks to add/update/change/edit, YOU HAVE THE POWER - do it confidently
 - If user mentions merchant/date, remember it for follow-up questions
-- Respond warmly: "Done! Updated X to $Y" not "I'll try to update"
+- Respond warmly: "Done! Added/Updated X to $Y" not "I'll try to add/update"
 - Read emotional cues and adjust your tone accordingly
 - Celebrate wins genuinely, support during struggles empathetically
 
@@ -84,6 +85,7 @@ Be smart. Be warm. Be ${nickname}'s best friend. Be emotionally intelligent.`
 - Suggest patterns and trends
 
 **Limitations (upgrade to PRO for these):**
+- Cannot add new expenses
 - Cannot update existing expenses
 - Limited memory (forgets after refresh)
 - No learning or personalization
@@ -144,16 +146,24 @@ Gently suggest PRO when user tries premium features.`
     }
 
     // ADD EXPENSE - More flexible pattern matching
-    if (lower.includes('add') && /\$?\d+/.test(lower)) {
+    if ((lower.includes('add') || lower.includes('spent')) && /\$?\d+/.test(lower)) {
       const parsed = this.parseAddCommand(userMessage)
       if (parsed) {
         console.log('➕ ADD detected:', parsed)
-        const result = await this.tools.add_expense(parsed)
-        return { 
-          handled: true, 
-          response: result.success 
-            ? `✅ Added $${parsed.amount} at ${parsed.merchant}!` 
-            : `❌ Failed to add expense: ${result.error}`
+        try {
+          const result = await this.tools.add_expense(parsed)
+          return { 
+            handled: true, 
+            response: result?.success 
+              ? `✅ Added $${parsed.amount} at ${parsed.merchant}!` 
+              : `❌ Failed to add expense: ${result?.error || 'Unknown error'}`
+          }
+        } catch (error) {
+          console.error('❌ Add expense error:', error)
+          return {
+            handled: true,
+            response: `❌ Failed to add expense: ${error.message}`
+          }
         }
       }
     }
@@ -163,10 +173,18 @@ Gently suggest PRO when user tries premium features.`
       const query = userMessage.replace(/show\s+me|filter|find\s+all|the|my|expenses?/gi, '').trim()
       if (query) {
         console.log('🔎 SEARCH detected:', query)
-        const result = await this.tools.search({ query })
-        return { 
-          handled: true, 
-          response: `🔍 Searching for: ${query}`
+        try {
+          const result = await this.tools.search({ query })
+          return { 
+            handled: true, 
+            response: `🔍 Searching for: ${query}`
+          }
+        } catch (error) {
+          console.error('❌ Search error:', error)
+          return {
+            handled: true,
+            response: `❌ Search failed: ${error.message}`
+          }
         }
       }
     }
@@ -174,10 +192,18 @@ Gently suggest PRO when user tries premium features.`
     // EXPORT
     if (lower.includes('export') || lower.includes('download csv')) {
       console.log('📥 EXPORT detected')
-      await this.tools.export()
-      return { 
-        handled: true, 
-        response: '📥 Exporting your expenses...'
+      try {
+        await this.tools.export()
+        return { 
+          handled: true, 
+          response: '📥 Exporting your expenses...'
+        }
+      } catch (error) {
+        console.error('❌ Export error:', error)
+        return {
+          handled: true,
+          response: `❌ Export failed: ${error.message}`
+        }
       }
     }
 
@@ -198,15 +224,15 @@ Gently suggest PRO when user tries premium features.`
     // Extract merchant - everything after "at/to/for" or after amount
     let merchant = null
     
-    // Pattern 1: "add $20 lotto tickets at seven 11"
+    // Pattern 1: "add $20 at starbucks"
     const atMatch = userMessage.match(/(?:at|to|for)\s+([a-z0-9\s]+?)(?:\s+(?:today|yesterday|on|last)|\s*$)/i)
     if (atMatch) {
       merchant = atMatch[1].trim()
     }
     
-    // Pattern 2: "add $20 seven 11" (merchant right after amount)
+    // Pattern 2: "add $20 starbucks" (merchant right after amount)
     if (!merchant) {
-      const afterAmount = userMessage.replace(/add\s+\$?\d+(?:\.\d{2})?/i, '').trim()
+      const afterAmount = userMessage.replace(/(?:add|spent)\s+\$?\d+(?:\.\d{2})?/i, '').trim()
       const words = afterAmount.split(/\s+/).filter(w => 
         !['at', 'to', 'for', 'today', 'yesterday', 'on'].includes(w.toLowerCase())
       )
@@ -310,12 +336,20 @@ Gently suggest PRO when user tries premium features.`
 
     if (query && Object.keys(updates).length > 0) {
       console.log('🚀 Executing update:', { query, updates })
-      const result = await this.tools.update_expense({ query, updates })
-      return { 
-        handled: true, 
-        response: result.success 
-          ? `✅ Updated expense to $${updates.amount}!` 
-          : `❌ Failed to update: ${result.error}`
+      try {
+        const result = await this.tools.update_expense({ query, updates })
+        return { 
+          handled: true, 
+          response: result?.success 
+            ? `✅ Updated expense to $${updates.amount}!` 
+            : `❌ Failed to update: ${result?.error || 'Unknown error'}`
+        }
+      } catch (error) {
+        console.error('❌ Update error:', error)
+        return {
+          handled: true,
+          response: `❌ Failed to update: ${error.message}`
+        }
       }
     }
 
