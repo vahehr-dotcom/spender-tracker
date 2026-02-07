@@ -963,7 +963,7 @@ function MainApp() {
           </div>
 
           <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-            <MonthlySummary expenses={allExpenses} categories={categories} />
+          <MonthlySummary expenses={allExpenses} categories={categories} isProMode={isProMode} />
           </div>
         </div>
 
