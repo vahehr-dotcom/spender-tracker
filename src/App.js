@@ -26,6 +26,156 @@ const AnalyticsPage = () => {
   )
 }
 
+// AddExpenseForm Wrapper Component
+function AddExpenseFormWrapper({ categories, onAddExpense, isProMode, onUpgradeToPro, userId }) {
+  const [amount, setAmount] = useState('')
+  const [merchant, setMerchant] = useState('')
+  const [spentAtLocal, setSpentAtLocal] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('card')
+  const [categoryId, setCategoryId] = useState('')
+  const [showMoreOptions, setShowMoreOptions] = useState(false)
+  const [isTaxDeductible, setIsTaxDeductible] = useState(false)
+  const [notes, setNotes] = useState('')
+  const [isReimbursable, setIsReimbursable] = useState(false)
+  const [employerOrClient, setEmployerOrClient] = useState('')
+  const [tagsText, setTagsText] = useState('')
+  const [showAddCategory, setShowAddCategory] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [receiptFile, setReceiptFile] = useState(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+  const [categoryLearnedSource, setCategoryLearnedSource] = useState(null)
+
+  const customCategories = categories.filter(c => c.is_custom)
+  const customCount = customCategories.length
+  const canAddCategory = isProMode || customCount < 3
+
+  const handleAddCustomCategory = async () => {
+    if (!newCategoryName.trim()) {
+      alert('Please enter a category name')
+      return
+    }
+
+    if (!canAddCategory) {
+      alert('You have reached the limit of 3 custom categories. Upgrade to PRO for unlimited.')
+      return
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('categories')
+        .insert({
+          user_id: userId,
+          name: newCategoryName.trim(),
+          is_custom: true
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+
+      setNewCategoryName('')
+      setShowAddCategory(false)
+      setCategoryId(data.id)
+      window.location.reload() // Reload to refresh categories
+    } catch (err) {
+      console.error('Add category error:', err)
+      alert('Failed to add category')
+    }
+  }
+
+  const handleSave = async () => {
+    if (!amount || !merchant || !categoryId || !paymentMethod) {
+      alert('Please fill in all required fields (Amount, Paid to, Category, Payment Method)')
+      return
+    }
+
+    setIsSaving(true)
+    setSaveSuccess(false)
+
+    const expense = {
+      amount: parseFloat(amount),
+      merchant: merchant.trim(),
+      category_id: categoryId,
+      payment_method: paymentMethod,
+      spent_at: spentAtLocal ? new Date(spentAtLocal).toISOString() : new Date().toISOString(),
+      note: notes.trim() || null,
+      receipt: receiptFile,
+      is_tax_deductible: isTaxDeductible,
+      is_reimbursable: isReimbursable,
+      employer_or_client: isReimbursable ? employerOrClient.trim() : null,
+      tags: tagsText.trim() ? tagsText.split(',').map(t => t.trim()).filter(Boolean) : []
+    }
+
+    const result = await onAddExpense(expense)
+
+    setIsSaving(false)
+
+    if (result.success) {
+      setSaveSuccess(true)
+      // Reset form
+      setAmount('')
+      setMerchant('')
+      setSpentAtLocal('')
+      setPaymentMethod('card')
+      setCategoryId('')
+      setNotes('')
+      setIsTaxDeductible(false)
+      setIsReimbursable(false)
+      setEmployerOrClient('')
+      setTagsText('')
+      setReceiptFile(null)
+      setCategoryLearnedSource(null)
+      setTimeout(() => setSaveSuccess(false), 2000)
+    } else {
+      alert(`Failed to add expense: ${result.error}`)
+    }
+  }
+
+  return (
+    <AddExpenseForm
+      amount={amount}
+      setAmount={setAmount}
+      merchant={merchant}
+      setMerchant={setMerchant}
+      spentAtLocal={spentAtLocal}
+      setSpentAtLocal={setSpentAtLocal}
+      paymentMethod={paymentMethod}
+      setPaymentMethod={setPaymentMethod}
+      categoryId={categoryId}
+      setCategoryId={setCategoryId}
+      categories={categories}
+      showMoreOptions={showMoreOptions}
+      setShowMoreOptions={setShowMoreOptions}
+      isTaxDeductible={isTaxDeductible}
+      setIsTaxDeductible={setIsTaxDeductible}
+      notes={notes}
+      setNotes={setNotes}
+      isProMode={isProMode}
+      isReimbursable={isReimbursable}
+      setIsReimbursable={setIsReimbursable}
+      employerOrClient={employerOrClient}
+      setEmployerOrClient={setEmployerOrClient}
+      tagsText={tagsText}
+      setTagsText={setTagsText}
+      showAddCategory={showAddCategory}
+      setShowAddCategory={setShowAddCategory}
+      newCategoryName={newCategoryName}
+      setNewCategoryName={setNewCategoryName}
+      customCount={customCount}
+      canAddCategory={canAddCategory}
+      onAddCustomCategory={handleAddCustomCategory}
+      onUpgradeToPro={onUpgradeToPro}
+      receiptFile={receiptFile}
+      setReceiptFile={setReceiptFile}
+      onSave={handleSave}
+      isSaving={isSaving}
+      saveSuccess={saveSuccess}
+      categoryLearnedSource={categoryLearnedSource}
+    />
+  )
+}
+
 function MainApp() {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -559,125 +709,6 @@ function MainApp() {
     setSession(null)
   }
 
-  const processReceiptWithOCR = async (file) => {
-    try {
-      const base64 = await new Promise((resolve) => {
-        const reader = new FileReader()
-        reader.onloadend = () => resolve(reader.result.split(',')[1])
-        reader.readAsDataURL(file)
-      })
-
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: 'Extract: merchant name, total amount, date (YYYY-MM-DD). Return JSON: {"merchant":"...","amount":0.00,"date":"YYYY-MM-DD"}'
-                },
-                {
-                  type: 'image_url',
-                  image_url: { url: `data:image/jpeg;base64,${base64}` }
-                }
-              ]
-            }
-          ],
-          max_tokens: 300
-        })
-      })
-
-      const data = await response.json()
-      const content = data.choices[0].message.content
-      const jsonMatch = content.match(/\{[\s\S]*\}/)
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0])
-      }
-      return null
-    } catch (err) {
-      console.error('OCR error:', err)
-      return null
-    }
-  }
-
-  const parseNaturalDate = (input) => {
-    const today = new Date()
-    const lower = input.toLowerCase()
-
-    if (lower === 'today') return today.toISOString()
-    if (lower === 'yesterday') {
-      const yesterday = new Date(today)
-      yesterday.setDate(today.getDate() - 1)
-      return yesterday.toISOString()
-    }
-
-    const daysAgoMatch = lower.match(/(\d+)\s*days?\s*ago/)
-    if (daysAgoMatch) {
-      const days = parseInt(daysAgoMatch[1])
-      const date = new Date(today)
-      date.setDate(today.getDate() - days)
-      return date.toISOString()
-    }
-
-    try {
-      return new Date(input).toISOString()
-    } catch {
-      return today.toISOString()
-    }
-  }
-
-  const suggestCategoryForMerchant = async (merchant) => {
-    const lowerMerchant = merchant.toLowerCase()
-
-    if (merchantMemoryRef.current[lowerMerchant]) {
-      return merchantMemoryRef.current[lowerMerchant]
-    }
-
-    try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          messages: [
-            {
-              role: 'system',
-              content: 'You suggest expense categories. Reply with ONLY the category name from: Food & Dining, Transportation, Shopping, Entertainment, Bills & Utilities, Health & Fitness, Travel, Other.'
-            },
-            {
-              role: 'user',
-              content: `Merchant: ${merchant}`
-            }
-          ],
-          max_tokens: 20
-        })
-      })
-
-      const data = await response.json()
-      const suggestedCategory = data.choices[0].message.content.trim()
-      const match = categories.find(c => c.name.toLowerCase() === suggestedCategory.toLowerCase())
-
-      if (match) {
-        merchantMemoryRef.current[lowerMerchant] = match.id
-        return match.id
-      }
-    } catch (err) {
-      console.error('Category suggestion error:', err)
-    }
-
-    return categories[0]?.id || null
-  }
-
   const handleAICommand = async (command) => {
     const { action, data } = command
 
@@ -922,13 +953,12 @@ function MainApp() {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
           <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-            <AddExpenseForm
+            <AddExpenseFormWrapper
               categories={categories}
               onAddExpense={addExpense}
-              onProcessReceipt={processReceiptWithOCR}
-              onParseDate={parseNaturalDate}
-              onSuggestCategory={suggestCategoryForMerchant}
               isProMode={isProMode}
+              onUpgradeToPro={() => setShowUpgrade(true)}
+              userId={session.user.id}
             />
           </div>
 
