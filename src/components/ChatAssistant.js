@@ -23,7 +23,6 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
   const agentRef = useRef(null)
   const expensesRef = useRef(expenses)
   const categoriesRef = useRef(categories)
-  const profileLoadedRef = useRef(false)
   const initLockRef = useRef(false)
 
   useEffect(() => {
@@ -58,7 +57,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
         }
       }
 
-      agentRef.current = new NovaAgent(memoryRef.current, tools, true)
+      agentRef.current = new NovaAgent(memoryRef.current, tools, isProMode)
 
       const { data, error } = await supabase
         .from('user_preferences')
@@ -74,7 +73,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       setIsInitialized(true)
       console.log('✅ Nova initialized')
       
-      // Greet ONCE per page session (removed isProMode check)
+      // Greet ONCE per page session
       if (!hasGreetedGlobally && (error || !data || data.preference_value === 'true')) {
         hasGreetedGlobally = true
         setTimeout(() => {
@@ -88,18 +87,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     }
 
     initNova()
-  }, [userId, onAICommand])
-
-  useEffect(() => {
-    // FIX: Check if agent exists before calling pushContext
-    if (isProMode && !profileLoadedRef.current && agentRef.current) {
-      agentRef.current.pushContext('isProMode', true)
-      profileLoadedRef.current = true
-    } else if (!isProMode && profileLoadedRef.current) {
-      // Reset when switching back to Basic
-      profileLoadedRef.current = false
-    }
-  }, [isProMode])
+  }, [userId, onAICommand, isProMode])
 
   useEffect(() => {
     if (shouldAutoSubmit && aiInput.trim()) {

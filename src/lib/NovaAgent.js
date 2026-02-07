@@ -131,7 +131,9 @@ Gently suggest PRO when user tries premium features.`
    * Detect and execute commands
    */
   async detectAndExecute(userMessage, expenseData) {
-    if (!this.isProMode) return false // Commands only in PRO
+    if (!this.isProMode) {
+      return { handled: false }
+    }
 
     const lower = userMessage.toLowerCase()
     console.log('🔍 Agent analyzing:', userMessage)
@@ -146,8 +148,13 @@ Gently suggest PRO when user tries premium features.`
       const parsed = this.parseAddCommand(userMessage)
       if (parsed) {
         console.log('➕ ADD detected:', parsed)
-        this.tools.add_expense(parsed)
-        return true
+        const result = await this.tools.add_expense(parsed)
+        return { 
+          handled: true, 
+          response: result.success 
+            ? `✅ Added $${parsed.amount} at ${parsed.merchant}!` 
+            : `❌ Failed to add expense: ${result.error}`
+        }
       }
     }
 
@@ -156,19 +163,25 @@ Gently suggest PRO when user tries premium features.`
       const query = userMessage.replace(/show\s+me|filter|find\s+all|the|my|expenses?/gi, '').trim()
       if (query) {
         console.log('🔎 SEARCH detected:', query)
-        this.tools.search({ query })
-        return true
+        const result = await this.tools.search({ query })
+        return { 
+          handled: true, 
+          response: `🔍 Searching for: ${query}`
+        }
       }
     }
 
     // EXPORT
     if (lower.includes('export') || lower.includes('download csv')) {
       console.log('📥 EXPORT detected')
-      this.tools.export()
-      return true
+      await this.tools.export()
+      return { 
+        handled: true, 
+        response: '📥 Exporting your expenses...'
+      }
     }
 
-    return false
+    return { handled: false }
   }
 
   /**
@@ -297,12 +310,17 @@ Gently suggest PRO when user tries premium features.`
 
     if (query && Object.keys(updates).length > 0) {
       console.log('🚀 Executing update:', { query, updates })
-      this.tools.update_expense({ query, updates })
-      return true
+      const result = await this.tools.update_expense({ query, updates })
+      return { 
+        handled: true, 
+        response: result.success 
+          ? `✅ Updated expense to $${updates.amount}!` 
+          : `❌ Failed to update: ${result.error}`
+      }
     }
 
     console.log('❌ Incomplete update command:', { query, updates })
-    return false
+    return { handled: false }
   }
 
   /**
