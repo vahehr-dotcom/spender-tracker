@@ -713,8 +713,31 @@ function MainApp() {
     const { action, data } = command
 
     if (action === 'add_expense') {
-      const result = await addExpense(data)
-      return result.success ? { success: true, message: 'Expense added!' } : { success: false, message: result.error }
+      // Parse dateHint to actual date
+      let spentAt = new Date().toISOString()
+      if (data.dateHint === 'yesterday') {
+        const yesterday = new Date()
+        yesterday.setDate(yesterday.getDate() - 1)
+        spentAt = yesterday.toISOString()
+      }
+
+      // Find or use default category (use first category as fallback)
+      const defaultCategoryId = categories.length > 0 ? categories[0].id : null
+      
+      if (!defaultCategoryId) {
+        return { success: false, error: 'No categories available' }
+      }
+
+      const expense = {
+        amount: data.amount,
+        merchant: data.merchant,
+        category_id: defaultCategoryId,
+        spent_at: spentAt,
+        payment_method: 'card'
+      }
+
+      const result = await addExpense(expense)
+      return result.success ? { success: true, message: 'Expense added!' } : { success: false, error: result.error }
     }
 
     if (action === 'update_expense') {
