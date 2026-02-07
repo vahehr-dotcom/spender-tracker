@@ -40,20 +40,36 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
       const tools = {
         add_expense: async (params) => {
-          const result = await onAICommand({ action: 'add_expense', data: params })
-          return result
+          try {
+            const result = await onAICommand({ action: 'add_expense', data: params })
+            return { success: true, data: result }
+          } catch (error) {
+            return { success: false, error: error.message }
+          }
         },
         search: async (params) => {
-          const result = await onAICommand({ action: 'search', data: { term: params.query } })
-          return result
+          try {
+            const result = await onAICommand({ action: 'search', data: { term: params.query } })
+            return { success: true, data: result }
+          } catch (error) {
+            return { success: false, error: error.message }
+          }
         },
         export: async () => {
-          const result = await onAICommand({ action: 'export', data: {} })
-          return result
+          try {
+            const result = await onAICommand({ action: 'export', data: {} })
+            return { success: true, data: result }
+          } catch (error) {
+            return { success: false, error: error.message }
+          }
         },
         update_expense: async (params) => {
-          const result = await onAICommand({ action: 'update_expense', data: params })
-          return result
+          try {
+            const result = await onAICommand({ action: 'update_expense', data: params })
+            return { success: true, data: result }
+          } catch (error) {
+            return { success: false, error: error.message }
+          }
         }
       }
 
@@ -254,7 +270,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
         // If agent handled a command, show success message
         if (agentResponse && agentResponse.handled) {
-          response = agentResponse.response || agentResponse.message || 'Task completed successfully!'
+          response = agentResponse.response || 'Task completed successfully!'
         } else {
           // Agent couldn't handle it - fall back to OpenAI chat
           const systemPrompt = agentRef.current.buildSystemPrompt({
