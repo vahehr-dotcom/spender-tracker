@@ -88,12 +88,16 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     }
 
     initNova()
-  }, [userId, onAICommand, isProMode])
+  }, [userId, onAICommand])
 
   useEffect(() => {
+    // FIX: Check if agent exists before calling pushContext
     if (isProMode && !profileLoadedRef.current && agentRef.current) {
       agentRef.current.pushContext('isProMode', true)
       profileLoadedRef.current = true
+    } else if (!isProMode && profileLoadedRef.current) {
+      // Reset when switching back to Basic
+      profileLoadedRef.current = false
     }
   }, [isProMode])
 
