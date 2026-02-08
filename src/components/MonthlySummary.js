@@ -1,153 +1,63 @@
-import { useMemo, useState, useEffect } from 'react'
-import { Bar } from 'react-chartjs-2'
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend
-} from 'chart.js'
+import React, { useState, useEffect, useMemo } from 'react'
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
-
-export default function MonthlySummary({ expenses, categories, isProMode, onUpgradeToPro }) {
-  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth())
+function MonthlySummary({ expenses, categories, isProMode }) {
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  })
   const [aiInsights, setAiInsights] = useState([])
   const [loadingInsights, setLoadingInsights] = useState(false)
 
-  const monthOptions = useMemo(() => {
-    if (!expenses || expenses.length === 0) return []
-
-    const months = new Set()
-    expenses.forEach(e => {
-      const d = new Date(e.spent_at)
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      months.add(key)
-    })
-
-    const sorted = Array.from(months).sort().reverse()
-    return sorted
-  }, [expenses])
-
+  // Calculate monthly summary
   const summary = useMemo(() => {
-    if (!selectedMonth) return null
-
     const [year, month] = selectedMonth.split('-').map(Number)
-
     const filtered = expenses.filter(e => {
-      const d = new Date(e.spent_at)
-      return d.getFullYear() === year && d.getMonth() + 1 === month
+      const date = new Date(e.spent_at)
+      return date.getFullYear() === year && date.getMonth() === month - 1
     })
-
-    if (filtered.length === 0) return null
 
     const total = filtered.reduce((sum, e) => sum + Number(e.amount), 0)
 
     const byCategory = {}
     filtered.forEach(e => {
-      const catId = e.category_id
-      if (!byCategory[catId]) {
-        byCategory[catId] = { amount: 0, count: 0 }
-      }
-      byCategory[catId].amount += Number(e.amount)
-      byCategory[catId].count += 1
+      const cat = categories.find(c => c.id === e.category_id)
+      const catName = cat ? cat.name : 'Uncategorized'
+      byCategory[catName] = (byCategory[catName] || 0) + Number(e.amount)
     })
 
-    const breakdown = Object.keys(byCategory).map(catId => {
-      const cat = categories.find(c => c.id === catId)
-      return {
-        categoryId: catId,
-        categoryName: cat ? cat.name : '—',
-        amount: byCategory[catId].amount,
-        count: byCategory[catId].count
-      }
-    }).sort((a, b) => b.amount - a.amount)
-
-    // Tax & Reimbursement totals
-    const taxDeductible = filtered
-      .filter(e => e.is_tax_deductible)
-      .reduce((sum, e) => sum + Number(e.amount), 0)
-
-    const reimbursable = filtered
-      .filter(e => e.is_reimbursable)
-      .reduce((sum, e) => sum + Number(e.amount), 0)
-
-    const taxCount = filtered.filter(e => e.is_tax_deductible).length
-    const reimbursableCount = filtered.filter(e => e.is_reimbursable).length
-
-    return { 
-      total, 
-      breakdown, 
-      count: filtered.length,
-      taxDeductible,
-      taxCount,
-      reimbursable,
-      reimbursableCount,
-      filtered
-    }
+    return { filtered, total, byCategory }
   }, [expenses, categories, selectedMonth])
 
+  // Calculate previous month summary for comparison
   const previousMonthSummary = useMemo(() => {
-    if (!selectedMonth) return null
-
     const [year, month] = selectedMonth.split('-').map(Number)
-    
-    let prevYear = year
-    let prevMonth = month - 1
-    if (prevMonth === 0) {
-      prevMonth = 12
-      prevYear -= 1
-    }
+    const prevMonth = month === 1 ? 12 : month - 1
+    const prevYear = month === 1 ? year - 1 : year
 
     const filtered = expenses.filter(e => {
-      const d = new Date(e.spent_at)
-      return d.getFullYear() === prevYear && d.getMonth() + 1 === prevMonth
+      const date = new Date(e.spent_at)
+      return date.getFullYear() === prevYear && date.getMonth() === prevMonth - 1
     })
 
-    if (filtered.length === 0) return null
-
-    const total = filtered.reduce((sum, e) => sum + Number(e.amount), 0)
-    return { total }
+    return filtered.reduce((sum, e) => sum + Number(e.amount), 0)
   }, [expenses, selectedMonth])
 
-  const insights = useMemo(() => {
-    if (!summary) return []
+  const monthChange = previousMonthSummary > 0
+    ? ((summary.total - previousMonthSummary) / previousMonthSummary) * 100
+    : 0
 
-    const result = []
-
-    // Top category
-    if (summary.breakdown.length > 0) {
-      const top = summary.breakdown[0]
-      result.push(`💡 Your top spending category this month: ${top.categoryName} ($${top.amount.toFixed(2)})`)
+  // Generate month options (last 12 months)
+  const monthOptions = useMemo(() => {
+    const options = []
+    const now = new Date()
+    for (let i = 0; i < 12; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      const label = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+      options.push({ value, label })
     }
-
-    // Average daily spend
-    const daysInMonth = new Date(
-      parseInt(selectedMonth.split('-')[0]),
-      parseInt(selectedMonth.split('-')[1]),
-      0
-    ).getDate()
-    const avgDaily = summary.total / daysInMonth
-    result.push(`📊 Average daily spend: $${avgDaily.toFixed(2)}`)
-
-    // Compare to previous month (Pro only)
-    if (isProMode && previousMonthSummary) {
-      const diff = summary.total - previousMonthSummary.total
-      const percentChange = ((diff / previousMonthSummary.total) * 100).toFixed(1)
-      
-      if (diff > 0) {
-        result.push(`📈 You spent ${Math.abs(percentChange)}% more than last month (+$${diff.toFixed(2)})`)
-      } else if (diff < 0) {
-        result.push(`📉 You spent ${Math.abs(percentChange)}% less than last month (-$${Math.abs(diff).toFixed(2)})`)
-      } else {
-        result.push(`➡️ Your spending is the same as last month`)
-      }
-    }
-
-    return result
-  }, [summary, previousMonthSummary, selectedMonth, isProMode])
+    return options
+  }, [])
 
   // AI Insights (Pro only)
   useEffect(() => {
@@ -167,14 +77,12 @@ export default function MonthlySummary({ expenses, categories, isProMode, onUpgr
           category: categories.find(c => c.id === e.category_id)?.name || 'Other'
         }))
 
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        const response = await fetch('/api/chat', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'gpt-4o-mini',
             messages: [
               {
                 role: 'user',
@@ -197,31 +105,19 @@ Rules:
 - Keep each insight under 100 characters`
               }
             ],
-            max_tokens: 500,
-            temperature: 0.3
+            max_tokens: 500
           })
         })
 
-        if (!response.ok) {
-          throw new Error(`AI API error: ${response.status}`)
-        }
-
         const data = await response.json()
-        const content = data?.choices?.[0]?.message?.content?.trim()
+        const content = data.choices[0].message.content.trim()
 
-        if (!content) {
-          throw new Error('No insights from AI')
+        // Parse JSON response (handle code fence if present)
+        const jsonMatch = content.match(/\[[\s\S]*\]/)
+        if (jsonMatch) {
+          const insights = JSON.parse(jsonMatch[0])
+          setAiInsights(insights.slice(0, 5))
         }
-
-        // Parse JSON (strip markdown if present)
-        let jsonText = content
-        if (jsonText.startsWith('```')) {
-          jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-        }
-
-        const parsed = JSON.parse(jsonText)
-        setAiInsights(Array.isArray(parsed) ? parsed : [])
-
       } catch (err) {
         console.error('AI Insights error:', err)
         setAiInsights([])
@@ -231,204 +127,116 @@ Rules:
     }
 
     generateAIInsights()
-  }, [summary, isProMode, categories])
-
-  const chartData = useMemo(() => {
-    if (!summary) return null
-
-    return {
-      labels: summary.breakdown.map(r => r.categoryName),
-      datasets: [
-        {
-          label: 'Amount ($)',
-          data: summary.breakdown.map(r => r.amount),
-          backgroundColor: 'rgba(54, 162, 235, 0.6)',
-          borderColor: 'rgba(54, 162, 235, 1)',
-          borderWidth: 1
-        }
-      ]
-    }
-  }, [summary])
-
-  const chartOptions = {
-    indexAxis: 'y',
-    responsive: true,
-    plugins: {
-      legend: { display: false },
-      title: { display: false }
-    },
-    scales: {
-      x: {
-        beginAtZero: true,
-        ticks: {
-          callback: (value) => `$${value}`
-        }
-      }
-    }
-  }
-
-  if (!monthOptions || monthOptions.length === 0) {
-    return (
-      <div style={{ marginTop: 30 }}>
-        <h2>Monthly Summary</h2>
-        <p>No expenses to summarize yet.</p>
-      </div>
-    )
-  }
+  }, [summary, categories, isProMode])
 
   return (
-    <div style={{ marginTop: 30 }}>
-      <h2>Monthly Summary</h2>
-
-      <div style={{ marginBottom: 16 }}>
-        <label style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <span>Select month:</span>
-          <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}>
-            {monthOptions.map(m => (
-              <option key={m} value={m}>
-                {formatMonthLabel(m)}
-              </option>
-            ))}
-          </select>
-        </label>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+        <h2 style={{ margin: 0 }}>Monthly Summary</h2>
+        <select
+          value={selectedMonth}
+          onChange={(e) => setSelectedMonth(e.target.value)}
+          style={{
+            padding: '8px 12px',
+            border: '2px solid #e5e7eb',
+            borderRadius: '8px',
+            fontSize: '14px',
+            cursor: 'pointer'
+          }}
+        >
+          {monthOptions.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
       </div>
 
-      {summary ? (
-        <div>
-          <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 16 }}>
-            Total: ${summary.total.toFixed(2)} ({summary.count} expenses)
-          </div>
-
-          {(summary.taxDeductible > 0 || summary.reimbursable > 0) && isProMode ? (
-            <div style={{
-              marginBottom: 20,
-              padding: 16,
-              backgroundColor: '#fff9e6',
-              borderRadius: 10,
-              border: '1px solid #ffd700'
-            }}>
-              <h3 style={{ marginTop: 0, marginBottom: 12 }}>Tax & Reimbursement</h3>
-              {summary.taxDeductible > 0 ? (
-                <div style={{ marginBottom: 8 }}>
-                  💼 Tax deductible: <strong>${summary.taxDeductible.toFixed(2)}</strong> ({summary.taxCount} expenses)
-                </div>
-              ) : null}
-              {summary.reimbursable > 0 ? (
-                <div>
-                  💵 Reimbursable: <strong>${summary.reimbursable.toFixed(2)}</strong> ({summary.reimbursableCount} expenses)
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {insights.length > 0 ? (
-            <div style={{ 
-              marginBottom: 20, 
-              padding: 16, 
-              backgroundColor: '#f8f9fa', 
-              borderRadius: 10,
-              border: '1px solid #e0e0e0'
-            }}>
-              <h3 style={{ marginTop: 0, marginBottom: 12 }}>Insights</h3>
-              {insights.map((insight, idx) => (
-                <div key={idx} style={{ marginBottom: 8, lineHeight: 1.5 }}>
-                  {insight}
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          {/* AI Insights (Pro only) */}
-          {isProMode && (
-            <div style={{ 
-              marginBottom: 20, 
-              padding: 16, 
-              backgroundColor: '#e8f5e9', 
-              borderRadius: 10,
-              border: '2px solid #4caf50'
-            }}>
-              <h3 style={{ marginTop: 0, marginBottom: 12, color: '#2e7d32' }}>🤖 AI-Powered Insights</h3>
-              {loadingInsights ? (
-                <div style={{ fontStyle: 'italic', color: '#666' }}>Analyzing your spending patterns...</div>
-              ) : aiInsights.length > 0 ? (
-                aiInsights.map((insight, idx) => (
-                  <div key={idx} style={{ marginBottom: 8, lineHeight: 1.5, fontWeight: 500 }}>
-                    {insight}
-                  </div>
-                ))
-              ) : (
-                <div style={{ fontStyle: 'italic', color: '#666' }}>No AI insights available for this period.</div>
-              )}
-            </div>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: '15px',
+        marginBottom: '20px'
+      }}>
+        <div style={{
+          padding: '20px',
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          borderRadius: '12px',
+          color: 'white'
+        }}>
+          <p style={{ margin: '0 0 5px 0', opacity: 0.9, fontSize: '14px' }}>Total Spent</p>
+          <p style={{ margin: 0, fontSize: '32px', fontWeight: 'bold' }}>${summary.total.toFixed(2)}</p>
+          {previousMonthSummary > 0 && (
+            <p style={{ margin: '5px 0 0 0', fontSize: '12px', opacity: 0.8 }}>
+              {monthChange >= 0 ? '↑' : '↓'} {Math.abs(monthChange).toFixed(1)}% vs last month
+            </p>
           )}
-
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 30 }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid #ddd', textAlign: 'left' }}>
-                <th style={{ padding: 8 }}>Category</th>
-                <th style={{ padding: 8 }}>Amount</th>
-                <th style={{ padding: 8 }}>Count</th>
-              </tr>
-            </thead>
-            <tbody>
-              {summary.breakdown.map(row => (
-                <tr key={row.categoryId} style={{ borderBottom: '1px solid #eee' }}>
-                  <td style={{ padding: 8 }}>{row.categoryName}</td>
-                  <td style={{ padding: 8 }}>${row.amount.toFixed(2)}</td>
-                  <td style={{ padding: 8 }}>{row.count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {isProMode && chartData ? (
-            <div style={{ maxWidth: 600 }}>
-              <h3>Spending by Category</h3>
-              <Bar data={chartData} options={chartOptions} />
-            </div>
-          ) : !isProMode ? (
-            <div style={{
-              maxWidth: 600,
-              padding: 20,
-              border: '2px dashed #ff9800',
-              borderRadius: 12,
-              textAlign: 'center',
-              backgroundColor: '#fff8e1'
-            }}>
-              <h3 style={{ marginTop: 0 }}>📊 Unlock Charts & AI Insights</h3>
-              <p style={{ marginBottom: 16 }}>Upgrade to Pro to visualize your spending with beautiful charts and get AI-powered predictions.</p>
-              <button 
-                onClick={onUpgradeToPro}
-                style={{
-                  padding: '10px 24px',
-                  fontSize: 16,
-                  backgroundColor: '#ff9800',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 8,
-                  cursor: 'pointer',
-                  fontWeight: 600
-                }}
-              >
-                Upgrade to Pro
-              </button>
-            </div>
-          ) : null}
         </div>
-      ) : (
-        <p>No expenses for this month.</p>
+
+        <div style={{
+          padding: '20px',
+          background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+          borderRadius: '12px',
+          color: 'white'
+        }}>
+          <p style={{ margin: '0 0 5px 0', opacity: 0.9, fontSize: '14px' }}>Transactions</p>
+          <p style={{ margin: 0, fontSize: '32px', fontWeight: 'bold' }}>{summary.filtered.length}</p>
+          <p style={{ margin: '5px 0 0 0', fontSize: '12px', opacity: 0.8 }}>
+            Avg: ${summary.filtered.length > 0 ? (summary.total / summary.filtered.length).toFixed(2) : '0.00'}
+          </p>
+        </div>
+      </div>
+
+      {isProMode && loadingInsights && (
+        <div style={{
+          padding: '15px',
+          background: '#f3f4f6',
+          borderRadius: '8px',
+          marginBottom: '15px',
+          textAlign: 'center',
+          color: '#6b7280'
+        }}>
+          🤖 Analyzing your spending patterns...
+        </div>
       )}
+
+      {isProMode && aiInsights.length > 0 && (
+        <div style={{
+          padding: '15px',
+          background: 'linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%)',
+          borderRadius: '8px',
+          marginBottom: '15px'
+        }}>
+          <h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>🤖 AI Insights (PRO)</h3>
+          {aiInsights.map((insight, idx) => (
+            <p key={idx} style={{ margin: '5px 0', fontSize: '14px' }}>{insight}</p>
+          ))}
+        </div>
+      )}
+
+      <div>
+        <h3 style={{ marginBottom: '10px' }}>By Category</h3>
+        {Object.entries(summary.byCategory).length === 0 ? (
+          <p style={{ color: '#6b7280' }}>No expenses this month</p>
+        ) : (
+          Object.entries(summary.byCategory)
+            .sort(([, a], [, b]) => b - a)
+            .map(([cat, amount]) => (
+              <div key={cat} style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '10px',
+                background: '#f9fafb',
+                borderRadius: '6px',
+                marginBottom: '8px'
+              }}>
+                <span style={{ fontWeight: '500' }}>{cat}</span>
+                <span style={{ color: '#6b7280' }}>${amount.toFixed(2)}</span>
+              </div>
+            ))
+        )}
+      </div>
     </div>
   )
 }
 
-function getCurrentMonth() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-
-function formatMonthLabel(monthKey) {
-  const [year, month] = monthKey.split('-')
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return `${monthNames[Number(month) - 1]} ${year}`
-}
+export default MonthlySummary
