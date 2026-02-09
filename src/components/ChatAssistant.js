@@ -3,8 +3,8 @@ import { supabase } from '../supabaseClient'
 import MemoryManager from '../lib/MemoryManager'
 import NovaAgent from '../lib/NovaAgent'
 
-// Global flag to prevent multiple greetings across all instances
-let hasGreetedGlobally = false
+// Track which user ID has been greeted this session
+let greetedUserId = null
 
 function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICommand, userId, notifications = [], onDismissNotification }) {
   const [aiInput, setAiInput] = useState('')
@@ -75,23 +75,30 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
       agentRef.current = new NovaAgent(memoryRef.current, tools, isProMode)
 
-      const { data, error } = await supabase
-        .from('user_preferences')
-        .select('preference_value')
-        .eq('user_id', userId)
-        .eq('preference_type', 'voice_greeting')
-        .single()
+      // Check voice greeting preference - default to TRUE if error or not set
+      let shouldGreet = true
+      try {
+        const { data, error } = await supabase
+          .from('user_preferences')
+          .select('preference_value')
+          .eq('user_id', userId)
+          .eq('preference_type', 'voice_greeting')
+          .single()
 
-      if (!error && data) {
-        setVoiceGreetingEnabled(data.preference_value === 'true')
+        if (!error && data) {
+          shouldGreet = data.preference_value === 'true'
+          setVoiceGreetingEnabled(data.preference_value === 'true')
+        }
+      } catch (err) {
+        console.log('Voice greeting preference not found, defaulting to enabled')
       }
 
       setIsInitialized(true)
       console.log('✅ Nova initialized')
       
-      // Greet ONCE per page session
-      if (!hasGreetedGlobally && (error || !data || data.preference_value === 'true')) {
-        hasGreetedGlobally = true
+      // Greet if this user hasn't been greeted yet AND greeting is enabled
+      if (greetedUserId !== userId && shouldGreet) {
+        greetedUserId = userId
         setTimeout(() => {
           const displayName = memoryRef.current?.preferences?.display_name || memoryRef.current?.getNickname() || 'friend'
           const title = memoryRef.current?.preferences?.title
@@ -168,8 +175,6 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
   }
 
   const speak = async (text) => {
-    if (!voiceGreetingEnabled) return
-
     try {
       setIsSpeaking(true)
 
