@@ -173,16 +173,14 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     try {
       setIsSpeaking(true)
 
-      const response = await fetch('https://api.openai.com/v1/audio/speech', {
+      const response = await fetch('/api/tts', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'tts-1',
+          text,
           voice: 'nova',
-          input: text,
           speed: 0.95
         })
       })
@@ -252,8 +250,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     }
 
     if (!aiInput.trim()) return
-
-    const userMessage = aiInput
+    const userMessage = aiInput.trim()
     setAiInput('')
     setIsThinking(true)
 
@@ -263,37 +260,26 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       let response = ''
 
       if (isProMode && agentRef.current) {
-        const agentResponse = await agentRef.current.detectAndExecute(userMessage, {
+        const expenseData = {
           expenses: expensesRef.current,
           categories: categoriesRef.current
-        })
+        }
 
-        // If agent handled a command, show success message
-        if (agentResponse && agentResponse.handled) {
-          response = agentResponse.response || 'Task completed successfully!'
+        const agentResult = await agentRef.current.detectAndExecute(userMessage, expenseData)
+        console.log('🤖 Agent result:', agentResult)
+
+        if (agentResult.handled) {
+          response = agentResult.response
         } else {
-          // Agent couldn't handle it - fall back to OpenAI chat
-          const systemPrompt = agentRef.current.buildSystemPrompt({
-            expenses: expensesRef.current,
-            categories: categoriesRef.current
-          })
-
-          const conversationHistory = memoryRef.current.getConversationHistory()
-
-          const apiMessages = [
-            { role: 'system', content: systemPrompt },
-            ...conversationHistory.map(msg => ({ role: msg.role, content: msg.content })),
-            { role: 'user', content: userMessage }
-          ]
+          const systemPrompt = agentRef.current.buildSystemPrompt(expenseData)
+          const messages = agentRef.current.buildMessages(systemPrompt, userMessage)
 
           const apiResponse = await fetch('/api/chat', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-              messages: apiMessages
-            })
+            body: JSON.stringify({ messages })
           })
 
           const data = await apiResponse.json()
