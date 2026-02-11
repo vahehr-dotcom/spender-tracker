@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-export default function Onboarding({ user, onComplete }) {
+export default function Onboarding({ user, onComplete, onLogout }) {
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [isSaving, setIsSaving] = useState(false)
