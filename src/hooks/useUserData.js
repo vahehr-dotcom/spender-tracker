@@ -9,12 +9,9 @@ const PRO_EMAILS = [
   'sako3000@gmail.com'
 ]
 
-// Emails that get admin access
+// Emails that get admin access (CEO only)
 const ADMIN_EMAILS = [
-  'lifeliftusa@gmail.com',
-  'vahehr@gmail.com',
-  'awillie2006@gmail.com',
-  'sako3000@gmail.com'
+  'lifeliftusa@gmail.com'
 ]
 
 export function useUserData() {
