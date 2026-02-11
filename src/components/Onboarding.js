@@ -186,6 +186,21 @@ export default function Onboarding({ user, onComplete }) {
         }}>
           Nova is your AI assistant who will help you track expenses and manage your finances.
         </p>
+
+        <button
+          onClick={onLogout}
+          style={{
+            marginTop: '20px',
+            background: 'none',
+            border: 'none',
+            color: '#6b7280',
+            cursor: 'pointer',
+            fontSize: '14px',
+            textDecoration: 'underline'
+          }}
+        >
+          ← Back to Login (use different account)
+        </button>
       </div>
     </div>
   )
