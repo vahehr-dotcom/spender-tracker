@@ -15,6 +15,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
   const [shouldAutoSubmit, setShouldAutoSubmit] = useState(false)
   const [isInitialized, setIsInitialized] = useState(false)
   const [voiceGreetingEnabled, setVoiceGreetingEnabled] = useState(true)
+  const [hasGreeted, setHasGreeted] = useState(false)
 
   const recognitionRef = useRef(null)
   const audioRef = useRef(null)
@@ -29,6 +30,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     categoriesRef.current = categories
   }, [expenses, categories])
 
+  // Initialize Nova (no greeting here)
   useEffect(() => {
     if (!userId || initLockRef.current) return
     initLockRef.current = true
@@ -74,7 +76,6 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
       agentRef.current = new NovaAgent(memoryRef.current, tools, isProMode)
 
-      let shouldGreet = true
       try {
         const { data, error } = await supabase
           .from('user_preferences')
@@ -84,7 +85,6 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
           .single()
 
         if (!error && data) {
-          shouldGreet = data.preference_value === 'true'
           setVoiceGreetingEnabled(data.preference_value === 'true')
         }
       } catch (err) {
@@ -93,30 +93,36 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
       setIsInitialized(true)
       console.log('✅ Nova initialized')
-      
-      if (greetedUserId !== userId && shouldGreet) {
-        greetedUserId = userId
-        setTimeout(() => {
-          const displayName = userProfile?.first_name || userProfile?.nickname || memoryRef.current?.preferences?.display_name || null
-          const title = userProfile?.title || memoryRef.current?.preferences?.title || null
-          
-          let greeting
-          if (displayName && title) {
-            greeting = `Hello ${displayName}, ${title}!`
-          } else if (displayName) {
-            greeting = `Hello ${displayName}!`
-          } else {
-            greeting = 'Hello!'
-          }
-          
-          console.log('👋 Greeting:', greeting)
-          speak(greeting)
-        }, 1000)
-      }
     }
 
     initNova()
-  }, [userId, onAICommand, isProMode, userProfile])
+  }, [userId, onAICommand, isProMode])
+
+  // Greeting effect - only runs when userProfile is loaded
+  useEffect(() => {
+    if (!userId || !userProfile || !isInitialized || hasGreeted) return
+    if (greetedUserId === userId) return
+    if (!voiceGreetingEnabled) return
+
+    greetedUserId = userId
+    setHasGreeted(true)
+
+    const displayName = userProfile.first_name || userProfile.nickname || null
+    const title = userProfile.title || null
+
+    let greeting
+    if (displayName && title) {
+      greeting = `Hello ${displayName}, ${title}!`
+    } else if (displayName) {
+      greeting = `Hello ${displayName}!`
+    } else {
+      greeting = 'Hello!'
+    }
+
+    console.log('👋 Greeting:', greeting)
+    setTimeout(() => speak(greeting), 500)
+
+  }, [userId, userProfile, isInitialized, hasGreeted, voiceGreetingEnabled])
 
   useEffect(() => {
     if (shouldAutoSubmit && aiInput.trim()) {
@@ -186,14 +192,8 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
       const response = await fetch('/api/tts', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          text,
-          voice: 'nova',
-          speed: 0.95
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice: 'nova', speed: 0.95 })
       })
 
       const audioBlob = await response.blob()
@@ -240,15 +240,11 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
         preference_type: 'voice_greeting',
         preference_value: newValue.toString(),
         set_at: new Date().toISOString()
-      }, {
-        onConflict: 'user_id,preference_type'
-      })
+      }, { onConflict: 'user_id,preference_type' })
 
       const confirmMessage = newValue ? 'Voice greeting has been turned on.' : 'Voice greeting has been turned off.'
       setLastResponse(confirmMessage)
-      if (newValue) {
-        speak(confirmMessage)
-      }
+      if (newValue) speak(confirmMessage)
     } catch (err) {
       console.error('Toggle voice greeting error:', err)
     }
@@ -271,52 +267,35 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       let response = ''
 
       if (isProMode && agentRef.current) {
-        const expenseData = {
-          expenses: expensesRef.current,
-          categories: categoriesRef.current
-        }
-
+        const expenseData = { expenses: expensesRef.current, categories: categoriesRef.current }
         const agentResult = await agentRef.current.detectAndExecute(userMessage, expenseData)
-        console.log('🤖 Agent result:', agentResult)
 
         if (agentResult.handled) {
           response = agentResult.response
         } else {
           const systemPrompt = agentRef.current.buildSystemPrompt(expenseData)
           const messages = agentRef.current.buildMessages(systemPrompt, userMessage)
-
           const apiResponse = await fetch('/api/chat', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ messages })
           })
-
           const data = await apiResponse.json()
           response = data.choices[0].message.content
         }
       } else {
         const systemPrompt = `You are Nova, a friendly AI assistant for expense tracking. Be helpful and concise.${memoryRef.current.buildMemoryContext()}`
-
         const conversationHistory = memoryRef.current.getConversationHistory()
-
         const apiMessages = [
           { role: 'system', content: systemPrompt },
           ...conversationHistory.map(msg => ({ role: msg.role, content: msg.content })),
           { role: 'user', content: userMessage }
         ]
-
         const apiResponse = await fetch('/api/chat', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            messages: apiMessages
-          })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: apiMessages })
         })
-
         const data = await apiResponse.json()
         response = data.choices[0].message.content
       }
@@ -339,27 +318,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     }
   }
 
-  const nickname = userProfile?.first_name || userProfile?.nickname || 'friend'
-
-  const getNotificationIcon = (type) => {
-    const icons = {
-      insight: '💡',
-      warning: '⚠️',
-      achievement: '🏆',
-      tip: '💰'
-    }
-    return icons[type] || '🔔'
-  }
-
-  const formatNotificationTime = (timestamp) => {
-    const diff = Date.now() - new Date(timestamp).getTime()
-    const minutes = Math.floor(diff / 60000)
-    if (minutes < 1) return 'Just now'
-    if (minutes < 60) return `${minutes}m ago`
-    const hours = Math.floor(minutes / 60)
-    if (hours < 24) return `${hours}h ago`
-    return `${Math.floor(hours / 24)}d ago`
-  }
+  const nickname = userProfile?.first_name || 'friend'
 
   return (
     <div style={{
@@ -424,40 +383,31 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       {isProMode && notifications && notifications.length > 0 && (
         <div style={{ marginBottom: '15px' }}>
           {notifications.map((notif, idx) => (
-            <div
-              key={idx}
-              style={{
-                background: 'rgba(255,255,255,0.2)',
-                padding: '12px',
-                borderRadius: '8px',
-                marginBottom: '8px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center'
-              }}
-            >
+            <div key={idx} style={{
+              background: 'rgba(255,255,255,0.2)',
+              padding: '12px',
+              borderRadius: '8px',
+              marginBottom: '8px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '20px' }}>{getNotificationIcon(notif.type)}</span>
+                <span style={{ fontSize: '20px' }}>
+                  {notif.type === 'insight' ? '💡' : notif.type === 'warning' ? '⚠️' : notif.type === 'achievement' ? '🏆' : '💰'}
+                </span>
                 <div>
                   <p style={{ margin: 0, fontWeight: 'bold' }}>{notif.message}</p>
-                  <p style={{ margin: '4px 0 0 0', fontSize: '12px', opacity: 0.8 }}>
-                    {formatNotificationTime(notif.timestamp)}
-                  </p>
                 </div>
               </div>
               {onDismissNotification && (
-                <button
-                  onClick={() => onDismissNotification(idx)}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'white',
-                    cursor: 'pointer',
-                    fontSize: '18px'
-                  }}
-                >
-                  ×
-                </button>
+                <button onClick={() => onDismissNotification(idx)} style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'white',
+                  cursor: 'pointer',
+                  fontSize: '18px'
+                }}>×</button>
               )}
             </div>
           ))}
