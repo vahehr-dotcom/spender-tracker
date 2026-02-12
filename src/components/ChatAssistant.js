@@ -3,10 +3,9 @@ import { supabase } from '../supabaseClient'
 import MemoryManager from '../lib/MemoryManager'
 import NovaAgent from '../lib/NovaAgent'
 
-// Track which user ID has been greeted this session
 let greetedUserId = null
 
-function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICommand, userId, notifications = [], onDismissNotification }) {
+function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICommand, userId, userProfile, notifications = [], onDismissNotification }) {
   const [aiInput, setAiInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
   const [isListening, setIsListening] = useState(false)
@@ -75,7 +74,6 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
       agentRef.current = new NovaAgent(memoryRef.current, tools, isProMode)
 
-      // Check voice greeting preference - default to TRUE if error or not set
       let shouldGreet = true
       try {
         const { data, error } = await supabase
@@ -96,13 +94,21 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       setIsInitialized(true)
       console.log('✅ Nova initialized')
       
-      // Greet if this user hasn't been greeted yet AND greeting is enabled
       if (greetedUserId !== userId && shouldGreet) {
         greetedUserId = userId
         setTimeout(() => {
-          const displayName = memoryRef.current?.preferences?.display_name || memoryRef.current?.getNickname() || 'friend'
-          const title = memoryRef.current?.preferences?.title
-          const greeting = title ? `Hello ${displayName}. ${title}.` : (displayName !== 'friend' ? `Hello ${displayName}!` : 'Hello!')
+          const displayName = userProfile?.first_name || userProfile?.nickname || memoryRef.current?.preferences?.display_name || null
+          const title = userProfile?.title || memoryRef.current?.preferences?.title || null
+          
+          let greeting
+          if (displayName && title) {
+            greeting = `Hello ${displayName}, ${title}!`
+          } else if (displayName) {
+            greeting = `Hello ${displayName}!`
+          } else {
+            greeting = 'Hello!'
+          }
+          
           console.log('👋 Greeting:', greeting)
           speak(greeting)
         }, 1000)
@@ -110,7 +116,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     }
 
     initNova()
-  }, [userId, onAICommand, isProMode])
+  }, [userId, onAICommand, isProMode, userProfile])
 
   useEffect(() => {
     if (shouldAutoSubmit && aiInput.trim()) {
@@ -333,7 +339,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     }
   }
 
-  const nickname = memoryRef.current ? memoryRef.current.getNickname() : 'friend'
+  const nickname = userProfile?.first_name || userProfile?.nickname || 'friend'
 
   const getNotificationIcon = (type) => {
     const icons = {

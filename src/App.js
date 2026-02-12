@@ -296,13 +296,14 @@ function MainApp() {
             </div>
           )}
 
-          <ChatAssistant
+        <ChatAssistant
             expenses={allExpenses}
             categories={categories}
             isProMode={isProMode}
             onUpgradeToPro={() => setShowUpgrade(true)}
             onAICommand={handleAICommand}
             userId={session.user.id}
+            userProfile={userProfile}
           />
 
           {isProMode && aiInsights && (
