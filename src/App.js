@@ -15,6 +15,7 @@ import AnalyticsDashboard from './components/AnalyticsDashboard'
 import LoginHistoryPage from './pages/LoginHistoryPage'
 
 import { useAuth, useUserData, useExpenses } from './hooks'
+import { supabase } from './supabaseClient'
 
 const AnalyticsPage = () => {
   const navigate = useNavigate()
@@ -123,6 +124,7 @@ function MainApp() {
 
   const handleAICommand = async (command) => {
     const { action, data } = command
+    console.log('🎯 handleAICommand called:', action, data)
 
     if (action === 'add_expense') {
       let spentAt = new Date().toISOString()
@@ -133,20 +135,43 @@ function MainApp() {
       }
 
       const defaultCategoryId = categories.length > 0 ? categories[0].id : null
+      console.log('📂 Categories available:', categories.length, 'Default ID:', defaultCategoryId)
+      
       if (!defaultCategoryId) {
+        console.error('❌ No categories available')
         return { success: false, error: 'No categories available' }
       }
 
       const expense = {
-        amount: data.amount,
+        user_id: session.user.id,
+        amount: parseFloat(data.amount),
         merchant: data.merchant,
         category_id: defaultCategoryId,
         spent_at: spentAt,
-        payment_method: 'card'
+        payment_method: 'card',
+        archived: false
       }
 
-      const result = await addExpense(expense, session.user.id)
-      return result.success ? { success: true, message: 'Expense added!' } : { success: false, error: result.error }
+      console.log('💰 Inserting expense:', expense)
+
+      try {
+        const { data: insertedData, error } = await supabase
+          .from('expenses')
+          .insert([expense])
+          .select()
+
+        if (error) {
+          console.error('❌ Supabase insert error:', error)
+          return { success: false, error: error.message }
+        }
+
+        console.log('✅ Expense inserted:', insertedData)
+        await loadExpenses(session.user.id)
+        return { success: true, message: 'Expense added!' }
+      } catch (err) {
+        console.error('❌ Insert exception:', err)
+        return { success: false, error: err.message }
+      }
     }
 
     if (action === 'update_expense') {
@@ -296,7 +321,7 @@ function MainApp() {
             </div>
           )}
 
-        <ChatAssistant
+          <ChatAssistant
             expenses={allExpenses}
             categories={categories}
             isProMode={isProMode}
