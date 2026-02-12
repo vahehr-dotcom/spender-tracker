@@ -9,8 +9,8 @@ export function useAuth() {
   const sessionIdRef = useRef(null)
   const intervalRef = useRef(null)
   const sessionStartRef = useRef(null)
+  const hasLoggedRef = useRef(false)
 
-  // Initialize session on mount
   useEffect(() => {
     const initSession = async () => {
       try {
@@ -25,13 +25,11 @@ export function useAuth() {
 
     initSession()
 
-    // Listen for auth changes
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       setLoading(false)
     })
 
-    // Handle page unload - save session duration
     const handleBeforeUnload = () => {
       if (sessionIdRef.current && sessionStartRef.current) {
         const duration = Math.floor((Date.now() - sessionStartRef.current) / 1000)
@@ -57,7 +55,6 @@ export function useAuth() {
     }
   }, [])
 
-  // Handle email/password login
   const handleLogin = async (email, password) => {
     try {
       setLoginStatus('Logging in...')
@@ -82,7 +79,6 @@ export function useAuth() {
     }
   }
 
-  // Handle logout
   const handleLogout = async () => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current)
@@ -104,12 +100,17 @@ export function useAuth() {
       }
     }
 
+    hasLoggedRef.current = false
+    sessionIdRef.current = null
+    sessionStartRef.current = null
+    
     await supabase.auth.signOut()
     setSession(null)
   }
 
-  // Start user session tracking
   const startSession = async (userId, email) => {
+    if (sessionIdRef.current) return
+
     try {
       const { data: existingSession } = await supabase
         .from('user_sessions')
@@ -120,6 +121,7 @@ export function useAuth() {
 
       if (existingSession) {
         sessionIdRef.current = existingSession.id
+        sessionStartRef.current = Date.now()
       } else {
         const { data: newSession, error } = await supabase
           .from('user_sessions')
@@ -128,7 +130,7 @@ export function useAuth() {
             email: email,
             session_start: new Date().toISOString(),
             last_activity: new Date().toISOString(),
-            device_info: navigator.userAgent
+            device_info: { userAgent: navigator.userAgent }
           })
           .select()
           .single()
@@ -142,7 +144,6 @@ export function useAuth() {
         sessionStartRef.current = Date.now()
       }
 
-      // Update activity every 30 seconds
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
       }
@@ -156,7 +157,6 @@ export function useAuth() {
     }
   }
 
-  // Update session activity timestamp
   const updateSessionActivity = async () => {
     if (!sessionIdRef.current) return
 
@@ -170,12 +170,15 @@ export function useAuth() {
     }
   }
 
-  // Log login event
   const logLogin = async (email) => {
+    if (hasLoggedRef.current) return
+    hasLoggedRef.current = true
+
     try {
       await supabase.from('login_logs').insert({
         email: email,
-        login_time: new Date().toISOString()
+        logged_in_at: new Date().toISOString(),
+        device_info: { userAgent: navigator.userAgent }
       })
       console.log('Login tracked for', email)
     } catch (err) {
@@ -183,13 +186,14 @@ export function useAuth() {
     }
   }
 
-  // Log page view
-  const logPageView = async (userId, page = '/') => {
+  const logPageView = async (userId, pageName = 'dashboard') => {
     try {
       await supabase.from('page_views').insert({
         user_id: userId,
-        page: page,
-        viewed_at: new Date().toISOString()
+        page_name: pageName,
+        page_url: window.location.pathname,
+        viewed_at: new Date().toISOString(),
+        device_info: { userAgent: navigator.userAgent }
       })
     } catch (err) {
       console.error('Page view log error:', err)
