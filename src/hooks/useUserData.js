@@ -164,19 +164,29 @@ export function useUserData() {
   }, [])
 
   const loadCategories = useCallback(async (userId) => {
+    console.log('📂 loadCategories called with userId:', userId)
     try {
-      // Load global categories (user_id is NULL) AND user's custom categories
       const { data, error } = await supabase
         .from('categories')
         .select('*')
-        .or(`user_id.is.null,user_id.eq.${userId}`)
         .order('name')
 
-      if (error) throw error
-      setCategories(data || [])
-      return data || []
+      console.log('📂 Categories query result:', { data, error })
+
+      if (error) {
+        console.error('📂 Categories error:', error)
+        setCategories([])
+        return []
+      }
+
+      const filtered = data.filter(c => c.user_id === null || c.user_id === userId)
+      console.log('📂 Filtered categories:', filtered.length)
+      
+      setCategories(filtered)
+      return filtered
     } catch (err) {
-      console.error('Load categories error:', err)
+      console.error('📂 Load categories exception:', err)
+      setCategories([])
       return []
     }
   }, [])
@@ -211,12 +221,15 @@ export function useUserData() {
   }, [])
 
   const loadAllUserData = useCallback(async (userId, email) => {
+    console.log('🔄 loadAllUserData called:', userId, email)
     const results = await Promise.all([
       loadUserRole(userId),
       loadUserProfile(userId, email),
       loadSubscription(email),
       loadCategories(userId)
     ])
+
+    console.log('🔄 loadAllUserData results:', results)
 
     return {
       role: results[0],
