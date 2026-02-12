@@ -30,7 +30,12 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     categoriesRef.current = categories
   }, [expenses, categories])
 
-  // Initialize Nova (no greeting here)
+  useEffect(() => {
+    if (agentRef.current) {
+      agentRef.current.isProMode = isProMode
+    }
+  }, [isProMode])
+
   useEffect(() => {
     if (!userId || initLockRef.current) return
     initLockRef.current = true
@@ -74,7 +79,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
         }
       }
 
-      agentRef.current = new NovaAgent(memoryRef.current, tools, isProMode)
+      agentRef.current = new NovaAgent(memoryRef.current, tools, true)
 
       try {
         const { data, error } = await supabase
@@ -96,9 +101,8 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     }
 
     initNova()
-  }, [userId, onAICommand, isProMode])
+  }, [userId, onAICommand])
 
-  // Greeting effect - only runs when userProfile is loaded
   useEffect(() => {
     if (!userId || !userProfile || !isInitialized || hasGreeted) return
     if (greetedUserId === userId) return
@@ -266,8 +270,13 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
       let response = ''
 
+      const expenseData = { expenses: expensesRef.current, categories: categoriesRef.current }
+      
+      if (agentRef.current) {
+        agentRef.current.isProMode = isProMode
+      }
+
       if (isProMode && agentRef.current) {
-        const expenseData = { expenses: expensesRef.current, categories: categoriesRef.current }
         const agentResult = await agentRef.current.detectAndExecute(userMessage, expenseData)
 
         if (agentResult.handled) {
