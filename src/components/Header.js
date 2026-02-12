@@ -4,6 +4,7 @@ export default function Header({
   userProfile,
   userEmail,
   isAdmin,
+  isTester,
   isProMode,
   testMode,
   onTestModeToggle,
@@ -14,7 +15,6 @@ export default function Header({
 }) {
   const navigate = useNavigate()
 
-  // Get display name
   const getDisplayName = () => {
     if (userProfile?.first_name) {
       return userProfile.first_name
@@ -25,7 +25,6 @@ export default function Header({
     return userEmail
   }
 
-  // Get title/role if exists
   const getTitle = () => {
     return userProfile?.title || null
   }
@@ -39,7 +38,6 @@ export default function Header({
       flexWrap: 'wrap',
       gap: '15px'
     }}>
-      {/* Logo/Title */}
       <h1 style={{
         margin: 0,
         fontSize: '32px',
@@ -50,7 +48,6 @@ export default function Header({
         Nova Expense Tracker
       </h1>
 
-      {/* User Greeting */}
       <div style={{
         padding: '12px 20px',
         background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
@@ -64,25 +61,26 @@ export default function Header({
         {getTitle() && ` - ${getTitle()}`}
       </div>
 
-      {/* Action Buttons */}
       <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-        {/* Admin Controls */}
+        {isTester && (
+          <button
+            onClick={onTestModeToggle}
+            style={{
+              padding: '10px 15px',
+              background: testMode ? '#6b7280' : '#10b981',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            {testMode ? '⚙️ Basic Mode' : '✅ PRO Mode'}
+          </button>
+        )}
+
         {isAdmin && (
           <>
-            <button
-              onClick={onTestModeToggle}
-              style={{
-                padding: '10px 15px',
-                background: testMode ? '#6b7280' : '#10b981',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
-              }}
-            >
-              {testMode ? '⚙️ Basic Mode' : '✅ PRO Mode'}
-            </button>
             <button
               onClick={() => navigate('/login-history')}
               style={{
@@ -112,7 +110,6 @@ export default function Header({
           </>
         )}
 
-        {/* Standard Controls */}
         <button
           onClick={onImport}
           style={{

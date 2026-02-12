@@ -156,7 +156,7 @@ export default function Login({ onLogin, status }) {
         Sign In
       </button>
 
-      {status && (
+      {status && status !== 'Login successful!' && (
         <p style={{ 
           marginTop: 16, 
           padding: 12, 

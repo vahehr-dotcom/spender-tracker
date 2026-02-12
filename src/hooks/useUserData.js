@@ -14,6 +14,14 @@ const ADMIN_EMAILS = [
   'lifeliftusa@gmail.com'
 ]
 
+// Emails that can toggle Basic/PRO for testing
+const TESTER_EMAILS = [
+  'lifeliftusa@gmail.com',
+  'vahehr@gmail.com',
+  'awillie2006@gmail.com',
+  'sako3000@gmail.com'
+]
+
 export function useUserData() {
   const [userRole, setUserRole] = useState('user')
   const [userProfile, setUserProfile] = useState(null)
@@ -21,7 +29,6 @@ export function useUserData() {
   const [categories, setCategories] = useState([])
   const [profileLoading, setProfileLoading] = useState(true)
 
-  // Load user role from preferences
   const loadUserRole = useCallback(async (userId) => {
     try {
       const { data, error } = await supabase
@@ -32,7 +39,6 @@ export function useUserData() {
         .single()
 
       if (error) {
-        console.error('Load role error:', error)
         setUserRole('user')
         return 'user'
       }
@@ -41,17 +47,14 @@ export function useUserData() {
       setUserRole(role)
       return role
     } catch (err) {
-      console.error('Role load error:', err)
       setUserRole('user')
       return 'user'
     }
   }, [])
 
-  // Load user profile from user_profiles table (new) with fallback to user_preferences (old)
   const loadUserProfile = useCallback(async (userId, email) => {
     setProfileLoading(true)
     try {
-      // First try the new user_profiles table
       const { data: profileData, error: profileError } = await supabase
         .from('user_profiles')
         .select('*')
@@ -59,13 +62,11 @@ export function useUserData() {
         .single()
 
       if (profileData && !profileError) {
-        console.log('Loaded user profile from user_profiles:', profileData)
         setUserProfile(profileData)
         setProfileLoading(false)
         return profileData
       }
 
-      // Fallback to old user_preferences table
       const { data, error } = await supabase
         .from('user_preferences')
         .select('preference_type, preference_value')
@@ -73,7 +74,6 @@ export function useUserData() {
         .in('preference_type', ['display_name', 'title'])
 
       if (error) {
-        console.error('Load profile error:', error)
         setProfileLoading(false)
         return null
       }
@@ -86,18 +86,15 @@ export function useUserData() {
         profile[pref.preference_type] = pref.preference_value
       })
 
-      console.log('Loaded user profile from user_preferences:', profile)
       setUserProfile(profile)
       setProfileLoading(false)
       return profile
     } catch (err) {
-      console.error('Profile load error:', err)
       setProfileLoading(false)
       return null
     }
   }, [])
 
-  // Check if user has completed onboarding
   const checkOnboardingStatus = useCallback(async (userId) => {
     try {
       const { data, error } = await supabase
@@ -107,24 +104,19 @@ export function useUserData() {
         .single()
 
       if (error || !data) {
-        // No profile exists - needs onboarding
         return { needsOnboarding: true, profile: null }
       }
 
-      // Profile exists but no first name - needs onboarding
       if (!data.first_name) {
         return { needsOnboarding: true, profile: data }
       }
 
-      // Profile complete
       return { needsOnboarding: false, profile: data }
     } catch (err) {
-      console.error('Onboarding check error:', err)
       return { needsOnboarding: true, profile: null }
     }
   }, [])
 
-  // Create or update user profile
   const saveUserProfile = useCallback(async (userId, profileData) => {
     try {
       const { data, error } = await supabase
@@ -143,14 +135,11 @@ export function useUserData() {
       setUserProfile(data)
       return { success: true, profile: data }
     } catch (err) {
-      console.error('Save profile error:', err)
       return { success: false, error: err.message }
     }
   }, [])
 
-  // Load subscription status
   const loadSubscription = useCallback(async (email) => {
-    // Check if email gets automatic PRO
     if (PRO_EMAILS.includes(email)) {
       setSubscriptionStatus('pro')
       return 'pro'
@@ -177,7 +166,6 @@ export function useUserData() {
     }
   }, [])
 
-  // Load categories
   const loadCategories = useCallback(async (userId) => {
     try {
       const { data, error } = await supabase
@@ -190,12 +178,10 @@ export function useUserData() {
       setCategories(data || [])
       return data || []
     } catch (err) {
-      console.error('Load categories error:', err)
       return []
     }
   }, [])
 
-  // Add custom category
   const addCategory = useCallback(async (userId, name) => {
     try {
       const { data, error } = await supabase
@@ -213,17 +199,18 @@ export function useUserData() {
       setCategories(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
       return { success: true, category: data }
     } catch (err) {
-      console.error('Add category error:', err)
       return { success: false, error: err.message }
     }
   }, [])
 
-  // Check if user is admin
   const isAdmin = useCallback((email) => {
     return ADMIN_EMAILS.includes(email) || userRole === 'admin'
   }, [userRole])
 
-  // Load all user data at once
+  const isTester = useCallback((email) => {
+    return TESTER_EMAILS.includes(email)
+  }, [])
+
   const loadAllUserData = useCallback(async (userId, email) => {
     const results = await Promise.all([
       loadUserRole(userId),
@@ -255,6 +242,7 @@ export function useUserData() {
     saveUserProfile,
     addCategory,
     isAdmin,
+    isTester,
     setCategories
   }
 }

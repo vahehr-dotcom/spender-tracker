@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom'
 
-// Components
 import Login from './components/Login'
 import Onboarding from './components/Onboarding'
 import Header from './components/Header'
@@ -15,10 +14,8 @@ import UpgradeModal from './components/UpgradeModal'
 import AnalyticsDashboard from './components/AnalyticsDashboard'
 import LoginHistoryPage from './pages/LoginHistoryPage'
 
-// Hooks
 import { useAuth, useUserData, useExpenses } from './hooks'
 
-// Analytics Page Wrapper
 const AnalyticsPage = () => {
   const navigate = useNavigate()
   return (
@@ -31,9 +28,7 @@ const AnalyticsPage = () => {
   )
 }
 
-// Main App Component
 function MainApp() {
-  // Auth hook
   const {
     session,
     loading: authLoading,
@@ -45,7 +40,6 @@ function MainApp() {
     logPageView
   } = useAuth()
 
-  // User data hook
   const {
     userProfile,
     subscriptionStatus,
@@ -53,10 +47,10 @@ function MainApp() {
     loadAllUserData,
     checkOnboardingStatus,
     saveUserProfile,
-    isAdmin
+    isAdmin,
+    isTester
   } = useUserData()
 
-  // Expenses hook
   const {
     expenses,
     pendingUndo,
@@ -69,7 +63,6 @@ function MainApp() {
     calculateAIInsights
   } = useExpenses(session?.user?.id)
 
-  // Local state
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [showUpgrade, setShowUpgrade] = useState(false)
@@ -80,23 +73,19 @@ function MainApp() {
 
   const navigate = useNavigate()
 
-  // Load user data when session changes
   useEffect(() => {
     if (session?.user) {
       const initializeUser = async () => {
-        // Check if user needs onboarding
         const { needsOnboarding } = await checkOnboardingStatus(session.user.id)
         
         if (needsOnboarding) {
           setShowOnboarding(true)
         } else {
           setShowOnboarding(false)
-          // Load all user data
           await loadAllUserData(session.user.id, session.user.email)
           await loadExpenses(session.user.id)
         }
 
-        // Track session
         startSession(session.user.id, session.user.email)
         logLogin(session.user.email)
         logPageView(session.user.id)
@@ -106,13 +95,11 @@ function MainApp() {
     }
   }, [session])
 
-  // Handle onboarding completion
   const handleOnboardingComplete = async (profileData) => {
     const result = await saveUserProfile(session.user.id, profileData)
     
     if (result.success) {
       setShowOnboarding(false)
-      // Load all data after onboarding
       await loadAllUserData(session.user.id, session.user.email)
       await loadExpenses(session.user.id)
     }
@@ -120,7 +107,6 @@ function MainApp() {
     return result
   }
 
-  // Filter expenses
   const allExpenses = showArchived ? expenses : expenses.filter(e => !e.archived)
   const filteredExpenses = allExpenses.filter(expense => {
     if (!searchTerm) return true
@@ -132,11 +118,9 @@ function MainApp() {
     )
   })
 
-  // PRO mode check
   const isProMode = !testMode && subscriptionStatus === 'pro'
   const aiInsights = isProMode ? calculateAIInsights(allExpenses, categories) : null
 
-  // Handle AI commands from ChatAssistant
   const handleAICommand = async (command) => {
     const { action, data } = command
 
@@ -183,7 +167,6 @@ function MainApp() {
     return { success: false, message: 'Unknown command' }
   }
 
-  // Import handlers
   const handleImport = async (file) => {
     const text = await file.text()
     const lines = text.split('\n').filter(line => line.trim())
@@ -210,7 +193,6 @@ function MainApp() {
     setParsedTransactions([])
   }
 
-  // Export handler
   const handleExport = () => {
     const headers = ['Date', 'Merchant', 'Category', 'Amount', 'Payment Method', 'Notes']
     const rows = filteredExpenses.map(e => [
@@ -231,12 +213,10 @@ function MainApp() {
     a.click()
   }
 
-  // Add expense handler for form
   const handleAddExpense = async (expense) => {
     return await addExpense(expense, session.user.id)
   }
 
-  // Loading state
   if (authLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
@@ -245,7 +225,6 @@ function MainApp() {
     )
   }
 
-  // Not logged in - show login
   if (!session) {
     return (
       <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
@@ -254,7 +233,6 @@ function MainApp() {
     )
   }
 
-// Needs onboarding - show welcome screen
   if (showOnboarding) {
     return (
       <Onboarding
@@ -264,11 +242,10 @@ function MainApp() {
       />
     )
   }
-  // Main dashboard
+
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', padding: '20px' }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-        {/* Main Card */}
         <div style={{
           background: 'white',
           borderRadius: '16px',
@@ -276,11 +253,11 @@ function MainApp() {
           boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
           marginBottom: '20px'
         }}>
-          {/* Header */}
           <Header
             userProfile={userProfile}
             userEmail={session.user.email}
             isAdmin={isAdmin(session.user.email)}
+            isTester={isTester(session.user.email)}
             isProMode={isProMode}
             testMode={testMode}
             onTestModeToggle={() => setTestMode(!testMode)}
@@ -290,7 +267,6 @@ function MainApp() {
             onUpgrade={() => setShowUpgrade(true)}
           />
 
-          {/* PRO Upgrade Banner */}
           {!isProMode && (
             <div style={{
               background: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)',
@@ -320,7 +296,6 @@ function MainApp() {
             </div>
           )}
 
-          {/* Nova Chat Assistant */}
           <ChatAssistant
             expenses={allExpenses}
             categories={categories}
@@ -330,7 +305,6 @@ function MainApp() {
             userId={session.user.id}
           />
 
-          {/* AI Insights (PRO only) */}
           {isProMode && aiInsights && (
             <div style={{
               background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
@@ -360,9 +334,7 @@ function MainApp() {
           )}
         </div>
 
-        {/* Two Column Layout */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
-          {/* Add Expense Form */}
           <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
             <AddExpenseForm
               categories={categories}
@@ -373,13 +345,11 @@ function MainApp() {
             />
           </div>
 
-          {/* Monthly Summary */}
           <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
             <MonthlySummary expenses={allExpenses} categories={categories} isProMode={isProMode} />
           </div>
         </div>
 
-        {/* Expense List */}
         <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
             <input
@@ -414,7 +384,6 @@ function MainApp() {
             onOpenReceipt={(url) => window.open(url, '_blank')}
           />
 
-          {/* Undo Toast */}
           {pendingUndo && (
             <div style={{
               position: 'fixed',
@@ -449,7 +418,6 @@ function MainApp() {
         </div>
       </div>
 
-      {/* Import Modal */}
       {showImport && (
         <div style={{
           position: 'fixed',
@@ -489,13 +457,11 @@ function MainApp() {
         </div>
       )}
 
-      {/* Upgrade Modal */}
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
     </div>
   )
 }
 
-// App Router
 function App() {
   return (
     <Router>
