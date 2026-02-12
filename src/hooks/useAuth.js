@@ -112,12 +112,13 @@ export function useAuth() {
     if (sessionIdRef.current) return
 
     try {
-      const { data: existingSession } = await supabase
+     const { data: existingSessions } = await supabase
         .from('user_sessions')
         .select('id')
         .eq('user_id', userId)
         .is('session_end', null)
-        .single()
+
+      const existingSession = existingSessions?.[0] || null
 
       if (existingSession) {
         sessionIdRef.current = existingSession.id
