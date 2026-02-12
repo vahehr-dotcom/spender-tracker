@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react'
 import { supabase } from '../supabaseClient'
 
-// Emails that get PRO access automatically
 const PRO_EMAILS = [
   'lifeliftusa@gmail.com',
   'vahehr@gmail.com',
@@ -9,12 +8,10 @@ const PRO_EMAILS = [
   'sako3000@gmail.com'
 ]
 
-// Emails that get admin access (CEO only)
 const ADMIN_EMAILS = [
   'lifeliftusa@gmail.com'
 ]
 
-// Emails that can toggle Basic/PRO for testing
 const TESTER_EMAILS = [
   'lifeliftusa@gmail.com',
   'vahehr@gmail.com',
@@ -168,16 +165,18 @@ export function useUserData() {
 
   const loadCategories = useCallback(async (userId) => {
     try {
+      // Load global categories (user_id is NULL) AND user's custom categories
       const { data, error } = await supabase
         .from('categories')
         .select('*')
-        .eq('user_id', userId)
+        .or(`user_id.is.null,user_id.eq.${userId}`)
         .order('name')
 
       if (error) throw error
       setCategories(data || [])
       return data || []
     } catch (err) {
+      console.error('Load categories error:', err)
       return []
     }
   }, [])
