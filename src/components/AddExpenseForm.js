@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useState } from 'react'
+import { supabase } from '../supabaseClient'
 
 function getNowLocalDateTime() {
   const now = new Date()
@@ -10,60 +11,85 @@ function getNowLocalDateTime() {
   return `${year}-${month}-${day}T${hours}:${minutes}`
 }
 
-export default function AddExpenseForm({
-  // state
-  amount, setAmount,
-  merchant, setMerchant,
-  spentAtLocal, setSpentAtLocal,
-  paymentMethod, setPaymentMethod,
-  categoryId, setCategoryId,
-  categories,
+export default function AddExpenseForm({ categories, onAddExpense, isProMode, onUpgradeToPro, userId }) {
+  const [amount, setAmount] = useState('')
+  const [merchant, setMerchant] = useState('')
+  const [spentAtLocal, setSpentAtLocal] = useState(getNowLocalDateTime())
+  const [paymentMethod, setPaymentMethod] = useState('card')
+  const [categoryId, setCategoryId] = useState('')
+  const [notes, setNotes] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+  const [showAddCategory, setShowAddCategory] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState('')
 
-  // basic/pro
-  showMoreOptions, setShowMoreOptions,
-  isTaxDeductible, setIsTaxDeductible,
-  notes, setNotes,
+  const handleSave = async () => {
+    if (!amount || !merchant || !categoryId) {
+      alert('Please fill in Amount, Merchant, and Category')
+      return
+    }
 
-  isProMode,
-  isReimbursable, setIsReimbursable,
-  employerOrClient, setEmployerOrClient,
-  tagsText, setTagsText,
+    setIsSaving(true)
+    setSaveSuccess(false)
 
-  // custom categories
-  showAddCategory, setShowAddCategory,
-  newCategoryName, setNewCategoryName,
-  customCount,
-  canAddCategory,
-  onAddCustomCategory,
-  onUpgradeToPro,
+    const expense = {
+      amount: parseFloat(amount),
+      merchant,
+      category_id: categoryId,
+      spent_at: new Date(spentAtLocal).toISOString(),
+      payment_method: paymentMethod,
+      note: notes || null
+    }
 
-  // receipt
-  receiptFile, setReceiptFile,
+    const result = await onAddExpense(expense)
 
-  // actions
-  onSave,
-  isSaving,
-  saveSuccess,
+    if (result.success) {
+      setSaveSuccess(true)
+      setAmount('')
+      setMerchant('')
+      setSpentAtLocal(getNowLocalDateTime())
+      setCategoryId('')
+      setNotes('')
+      setTimeout(() => setSaveSuccess(false), 2000)
+    } else {
+      alert('Failed to save: ' + (result.error || 'Unknown error'))
+    }
 
-  // learned indicator
-  categoryLearnedSource // "learned" | "rule" | "ai" | null
-}) {
+    setIsSaving(false)
+  }
+
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) return
+
+    try {
+      const { data, error } = await supabase
+        .from('categories')
+        .insert({
+          user_id: userId,
+          name: newCategoryName.trim(),
+          is_custom: true
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+
+      setNewCategoryName('')
+      setShowAddCategory(false)
+      setCategoryId(data.id)
+      window.location.reload()
+    } catch (err) {
+      alert('Failed to add category: ' + err.message)
+    }
+  }
+
+  const customCategoryCount = categories.filter(c => c.is_custom && c.user_id === userId).length
+  const canAddCategory = isProMode || customCategoryCount < 3
+
   return (
-    <div style={{ padding: '20px 0', maxWidth: '600px', margin: '0 auto', fontFamily: 'system-ui, sans-serif' }}>
-      
-      {/* DIVIDER: Or enter manually */}
-      <div style={{ 
-        textAlign: 'center', 
-        margin: '20px 0 30px 0',
-        fontSize: '14px',
-        color: '#999',
-        fontWeight: '600',
-        letterSpacing: '0.5px'
-      }}>
-        Or enter manually ↓
-      </div>
+    <div>
+      <h3 style={{ marginTop: 0, marginBottom: '20px' }}>Add Expense</h3>
 
-      {/* AMOUNT */}
       <div style={{ marginBottom: '15px' }}>
         <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
           Amount <span style={{ color: 'red' }}>*</span>
@@ -79,39 +105,37 @@ export default function AddExpenseForm({
             padding: '10px',
             fontSize: '16px',
             border: '1px solid #ddd',
-            borderRadius: '4px',
+            borderRadius: '8px',
             boxSizing: 'border-box'
           }}
         />
       </div>
 
-      {/* MERCHANT */}
       <div style={{ marginBottom: '15px' }}>
         <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
-          Paid to <span style={{ color: 'red' }}>*</span>
+          Merchant <span style={{ color: 'red' }}>*</span>
         </label>
         <input
           type="text"
           value={merchant}
           onChange={(e) => setMerchant(e.target.value)}
-          placeholder="e.g., Starbucks, Chevron, etc."
+          placeholder="e.g., Starbucks"
           style={{
             width: '100%',
             padding: '10px',
             fontSize: '16px',
             border: '1px solid #ddd',
-            borderRadius: '4px',
+            borderRadius: '8px',
             boxSizing: 'border-box'
           }}
         />
       </div>
 
-      {/* DATE & TIME */}
       <div style={{ marginBottom: '15px' }}>
         <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
           Date & Time <span style={{ color: 'red' }}>*</span>
         </label>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '10px' }}>
           <input
             type="datetime-local"
             value={spentAtLocal}
@@ -121,20 +145,18 @@ export default function AddExpenseForm({
               padding: '10px',
               fontSize: '16px',
               border: '1px solid #ddd',
-              borderRadius: '4px'
+              borderRadius: '8px'
             }}
           />
           <button
             onClick={() => setSpentAtLocal(getNowLocalDateTime())}
             style={{
               padding: '10px 15px',
-              fontSize: '14px',
-              border: '1px solid #4A90E2',
-              borderRadius: '4px',
-              backgroundColor: 'white',
-              color: '#4A90E2',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap'
+              border: '1px solid #667eea',
+              borderRadius: '8px',
+              background: 'white',
+              color: '#667eea',
+              cursor: 'pointer'
             }}
           >
             Now
@@ -142,49 +164,10 @@ export default function AddExpenseForm({
         </div>
       </div>
 
-      {/* CATEGORY with learned indicator */}
       <div style={{ marginBottom: '15px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
-          <label style={{ fontWeight: '600' }}>
-            Category <span style={{ color: 'red' }}>*</span>
-          </label>
-          {categoryLearnedSource === 'learned' && (
-            <span style={{ 
-              fontSize: '12px', 
-              padding: '2px 8px', 
-              backgroundColor: '#4CAF50', 
-              color: 'white', 
-              borderRadius: '10px',
-              fontWeight: 'bold'
-            }}>
-              Learned
-            </span>
-          )}
-          {categoryLearnedSource === 'rule' && (
-            <span style={{ 
-              fontSize: '12px', 
-              padding: '2px 8px', 
-              backgroundColor: '#FF9800', 
-              color: 'white', 
-              borderRadius: '10px',
-              fontWeight: 'bold'
-            }}>
-              Rule
-            </span>
-          )}
-          {categoryLearnedSource === 'ai' && (
-            <span style={{ 
-              fontSize: '12px', 
-              padding: '2px 8px', 
-              backgroundColor: '#2196F3', 
-              color: 'white', 
-              borderRadius: '10px',
-              fontWeight: 'bold'
-            }}>
-              AI
-            </span>
-          )}
-        </div>
+        <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
+          Category <span style={{ color: 'red' }}>*</span>
+        </label>
         <select
           value={categoryId}
           onChange={(e) => setCategoryId(e.target.value)}
@@ -193,51 +176,47 @@ export default function AddExpenseForm({
             padding: '10px',
             fontSize: '16px',
             border: '1px solid #ddd',
-            borderRadius: '4px',
+            borderRadius: '8px',
             boxSizing: 'border-box'
           }}
         >
           <option value="">-- Select Category --</option>
           {categories.map((cat) => (
-            <option key={cat.id} value={cat.id}>
-              {cat.name}
-            </option>
+            <option key={cat.id} value={cat.id}>{cat.name}</option>
           ))}
         </select>
 
-        {/* Add custom category */}
         <div style={{ marginTop: '10px' }}>
           {canAddCategory ? (
             <button
               onClick={() => setShowAddCategory(true)}
               style={{
                 padding: '8px 12px',
-                fontSize: '14px',
-                border: '1px solid #4A90E2',
-                borderRadius: '4px',
-                backgroundColor: 'white',
-                color: '#4A90E2',
-                cursor: 'pointer'
+                border: '1px solid #667eea',
+                borderRadius: '8px',
+                background: 'white',
+                color: '#667eea',
+                cursor: 'pointer',
+                fontSize: '14px'
               }}
             >
-              + Add Category
+              + Add Custom Category
             </button>
           ) : (
             <div style={{ fontSize: '14px', color: '#666' }}>
-              <span style={{ color: '#FF5252', fontWeight: 'bold' }}>Limit reached ({customCount})</span>
-              {' '}
+              <span style={{ color: '#ef4444' }}>3 custom categories limit reached</span>
               <button
                 onClick={onUpgradeToPro}
                 style={{
-                  marginLeft: '8px',
-                  padding: '6px 10px',
-                  fontSize: '13px',
+                  marginLeft: '10px',
+                  padding: '6px 12px',
                   border: 'none',
-                  borderRadius: '4px',
-                  backgroundColor: '#FF9800',
+                  borderRadius: '6px',
+                  background: '#f59e0b',
                   color: 'white',
                   cursor: 'pointer',
-                  fontWeight: 'bold'
+                  fontWeight: 'bold',
+                  fontSize: '13px'
                 }}
               >
                 Upgrade for unlimited
@@ -246,40 +225,37 @@ export default function AddExpenseForm({
           )}
         </div>
 
-        {/* Add category panel */}
         {showAddCategory && (
-          <div style={{ 
-            marginTop: '15px', 
-            padding: '15px', 
+          <div style={{
+            marginTop: '15px',
+            padding: '15px',
             border: '1px solid #ddd',
-            borderRadius: '6px',
-            backgroundColor: '#F9F9F9'
+            borderRadius: '8px',
+            background: '#f9fafb'
           }}>
-            <h4 style={{ marginTop: 0, marginBottom: '10px' }}>New Category</h4>
             <input
               type="text"
               value={newCategoryName}
               onChange={(e) => setNewCategoryName(e.target.value)}
-              placeholder="e.g., Groceries"
+              placeholder="Category name"
               style={{
                 width: '100%',
-                padding: '8px',
+                padding: '10px',
                 fontSize: '14px',
                 border: '1px solid #ddd',
-                borderRadius: '4px',
+                borderRadius: '6px',
                 marginBottom: '10px',
                 boxSizing: 'border-box'
               }}
             />
             <div style={{ display: 'flex', gap: '10px' }}>
               <button
-                onClick={onAddCustomCategory}
+                onClick={handleAddCategory}
                 style={{
                   padding: '8px 15px',
-                  fontSize: '14px',
                   border: 'none',
-                  borderRadius: '4px',
-                  backgroundColor: '#4CAF50',
+                  borderRadius: '6px',
+                  background: '#10b981',
                   color: 'white',
                   cursor: 'pointer',
                   fontWeight: 'bold'
@@ -291,26 +267,19 @@ export default function AddExpenseForm({
                 onClick={() => setShowAddCategory(false)}
                 style={{
                   padding: '8px 15px',
-                  fontSize: '14px',
                   border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  backgroundColor: 'white',
+                  borderRadius: '6px',
+                  background: 'white',
                   cursor: 'pointer'
                 }}
               >
                 Cancel
               </button>
             </div>
-            {!isProMode && (
-              <div style={{ marginTop: '10px', fontSize: '12px', color: '#666' }}>
-                You can add up to 3 custom categories. Upgrade to Pro for unlimited.
-              </div>
-            )}
           </div>
         )}
       </div>
 
-      {/* PAYMENT METHOD */}
       <div style={{ marginBottom: '15px' }}>
         <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
           Payment Method <span style={{ color: 'red' }}>*</span>
@@ -323,11 +292,10 @@ export default function AddExpenseForm({
             padding: '10px',
             fontSize: '16px',
             border: '1px solid #ddd',
-            borderRadius: '4px',
+            borderRadius: '8px',
             boxSizing: 'border-box'
           }}
         >
-          <option value="">-- Select --</option>
           <option value="card">Card</option>
           <option value="cash">Cash</option>
           <option value="apple_pay">Apple Pay</option>
@@ -335,162 +303,29 @@ export default function AddExpenseForm({
         </select>
       </div>
 
-      {/* MORE OPTIONS TOGGLE */}
-      <div style={{ marginBottom: '15px' }}>
-        <button
-          onClick={() => setShowMoreOptions(!showMoreOptions)}
-          style={{
-            padding: '8px 12px',
-            fontSize: '14px',
-            border: '1px solid #4A90E2',
-            borderRadius: '4px',
-            backgroundColor: 'white',
-            color: '#4A90E2',
-            cursor: 'pointer'
-          }}
-        >
-          {showMoreOptions ? '▼ Hide Options' : '▶ More Options'}
-        </button>
-      </div>
-
-      {/* MORE OPTIONS (tax, notes) */}
-      {showMoreOptions && (
-        <div style={{ 
-          marginBottom: '15px',
-          padding: '15px',
-          border: '1px solid #ddd',
-          borderRadius: '6px',
-          backgroundColor: '#FAFAFA'
-        }}>
-          <div style={{ marginBottom: '10px' }}>
-            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={isTaxDeductible}
-                onChange={(e) => setIsTaxDeductible(e.target.checked)}
-                style={{ marginRight: '8px', cursor: 'pointer' }}
-              />
-              <span style={{ fontWeight: '600' }}>Tax deductible</span>
-            </label>
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
-              Notes
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Optional notes..."
-              style={{
-                width: '100%',
-                padding: '8px',
-                fontSize: '14px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                boxSizing: 'border-box',
-                minHeight: '60px',
-                resize: 'vertical'
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* PRO OPTIONS */}
-      {isProMode && (
-        <div style={{ 
-          marginBottom: '15px',
-          padding: '15px',
-          border: '2px solid #4CAF50',
-          borderRadius: '6px',
-          backgroundColor: '#E8F5E9'
-        }}>
-          <h4 style={{ marginTop: 0, marginBottom: '10px', color: '#2E7D32' }}>PRO Options</h4>
-          
-          <div style={{ marginBottom: '10px' }}>
-            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={isReimbursable}
-                onChange={(e) => setIsReimbursable(e.target.checked)}
-                style={{ marginRight: '8px', cursor: 'pointer' }}
-              />
-              <span style={{ fontWeight: '600' }}>Reimbursable</span>
-            </label>
-          </div>
-
-          {isReimbursable && (
-            <div style={{ marginBottom: '10px' }}>
-              <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
-                Employer / Client
-              </label>
-              <input
-                type="text"
-                value={employerOrClient}
-                onChange={(e) => setEmployerOrClient(e.target.value)}
-                placeholder="e.g., Acme Corp"
-                style={{
-                  width: '100%',
-                  padding: '8px',
-                  fontSize: '14px',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  boxSizing: 'border-box'
-                }}
-              />
-            </div>
-          )}
-
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
-              Tags
-            </label>
-            <input
-              type="text"
-              value={tagsText}
-              onChange={(e) => setTagsText(e.target.value)}
-              placeholder="comma, separated, tags"
-              style={{
-                width: '100%',
-                padding: '8px',
-                fontSize: '14px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                boxSizing: 'border-box'
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* RECEIPT PHOTO */}
       <div style={{ marginBottom: '20px' }}>
         <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
-          Receipt Photo <span style={{ fontSize: '14px', color: '#666' }}>(optional)</span>
+          Notes <span style={{ fontSize: '14px', color: '#666' }}>(optional)</span>
         </label>
-        <input
-          type="file"
-          accept="image/*"
-          onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Add any notes..."
           style={{
             width: '100%',
-            padding: '8px',
+            padding: '10px',
             fontSize: '14px',
             border: '1px solid #ddd',
-            borderRadius: '4px',
-            boxSizing: 'border-box'
+            borderRadius: '8px',
+            boxSizing: 'border-box',
+            minHeight: '60px',
+            resize: 'vertical'
           }}
         />
-        {receiptFile && (
-          <div style={{ marginTop: '8px', fontSize: '14px', color: '#4CAF50' }}>
-            <strong>Selected:</strong> {receiptFile.name}
-          </div>
-        )}
       </div>
 
-      {/* SAVE BUTTON */}
       <button
-        onClick={onSave}
+        onClick={handleSave}
         disabled={isSaving}
         style={{
           width: '100%',
@@ -498,14 +333,13 @@ export default function AddExpenseForm({
           fontSize: '18px',
           fontWeight: 'bold',
           border: 'none',
-          borderRadius: '6px',
+          borderRadius: '8px',
           cursor: isSaving ? 'not-allowed' : 'pointer',
-          backgroundColor: isSaving ? '#B0BEC5' : saveSuccess ? '#4CAF50' : '#4A90E2',
-          color: 'white',
-          transition: 'background-color 0.3s'
+          background: isSaving ? '#9ca3af' : saveSuccess ? '#10b981' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          color: 'white'
         }}
       >
-        {isSaving ? 'Saving...' : saveSuccess ? '✓ Saved' : 'Add Expense'}
+        {isSaving ? 'Saving...' : saveSuccess ? '✓ Saved!' : 'Add Expense'}
       </button>
     </div>
   )
