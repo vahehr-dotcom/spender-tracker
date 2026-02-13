@@ -9,12 +9,12 @@ export default function AdminPanel({ onClose }) {
   const [updating, setUpdating] = useState(null)
   const [activeTab, setActiveTab] = useState('users')
   
-  // Add pending user form
   const [newEmail, setNewEmail] = useState('')
   const [newRole, setNewRole] = useState('user')
   const [newIsPro, setNewIsPro] = useState(false)
   const [newNotes, setNewNotes] = useState('')
   const [adding, setAdding] = useState(false)
+  const [sendingInvite, setSendingInvite] = useState(null)
 
   useEffect(() => {
     loadUsers()
@@ -165,6 +165,37 @@ export default function AdminPanel({ onClose }) {
     setUpdating(null)
   }
 
+  const sendInvite = async (user) => {
+    setSendingInvite(user.id)
+    try {
+      const response = await fetch('/api/send-invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: user.email,
+          role: user.role,
+          isPro: user.is_pro
+        })
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send invite')
+      }
+
+      setPendingUsers(pendingUsers.map(u => 
+        u.id === user.id ? { ...u, invite_sent: true, invite_sent_at: new Date().toISOString() } : u
+      ))
+
+      alert('Invite sent successfully!')
+    } catch (err) {
+      console.error('Send invite error:', err)
+      alert('Failed to send invite: ' + err.message)
+    }
+    setSendingInvite(null)
+  }
+
   const filteredUsers = users.filter(user => {
     if (!searchTerm) return true
     const search = searchTerm.toLowerCase()
@@ -191,6 +222,16 @@ export default function AdminPanel({ onClose }) {
     }
   }
 
+  const formatDate = (dateStr) => {
+    if (!dateStr) return ''
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+
   return (
     <div style={{
       position: 'fixed',
@@ -209,7 +250,7 @@ export default function AdminPanel({ onClose }) {
         background: 'white',
         borderRadius: '16px',
         padding: '30px',
-        maxWidth: '1100px',
+        maxWidth: '1200px',
         width: '100%',
         maxHeight: '85vh',
         overflow: 'hidden',
@@ -241,7 +282,6 @@ export default function AdminPanel({ onClose }) {
           </button>
         </div>
 
-        {/* Tabs */}
         <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
           <button
             onClick={() => setActiveTab('users')}
@@ -289,7 +329,6 @@ export default function AdminPanel({ onClose }) {
           }}
         />
 
-        {/* Active Users Tab */}
         {activeTab === 'users' && (
           <div style={{
             flex: 1,
@@ -419,10 +458,8 @@ export default function AdminPanel({ onClose }) {
           </div>
         )}
 
-        {/* Pending Users Tab */}
         {activeTab === 'pending' && (
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            {/* Add New Pending User Form */}
             <div style={{
               padding: '20px',
               background: '#f3f4f6',
@@ -524,7 +561,6 @@ export default function AdminPanel({ onClose }) {
               </p>
             </div>
 
-            {/* Pending Users List */}
             <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px' }}>
               {filteredPending.length === 0 ? (
                 <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
@@ -538,12 +574,12 @@ export default function AdminPanel({ onClose }) {
                       <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Role</th>
                       <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>PRO</th>
                       <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Notes</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Invite Status</th>
                       <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredPending.map(user => {
-                      const roleBadge = getRoleBadge(user.role)
                       return (
                         <tr key={user.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
                           <td style={{ padding: '12px 16px', fontWeight: '500' }}>
@@ -590,20 +626,56 @@ export default function AdminPanel({ onClose }) {
                             {user.notes || '-'}
                           </td>
                           <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                            <button
-                              onClick={() => deletePendingUser(user.id)}
-                              style={{
-                                padding: '6px 12px',
-                                background: '#ef4444',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '6px',
-                                cursor: 'pointer',
-                                fontSize: '12px'
-                              }}
-                            >
-                              Remove
-                            </button>
+                            {user.invite_sent ? (
+                              <span style={{ fontSize: '12px', color: '#10b981' }}>
+                                ✓ Sent {formatDate(user.invite_sent_at)}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                                Not sent
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                              <button
+                                onClick={() => sendInvite(user)}
+                                disabled={sendingInvite === user.id}
+                                style={{
+                                  padding: '6px 12px',
+                                  background: user.invite_sent 
+                                    ? '#6b7280' 
+                                    : 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: sendingInvite === user.id ? 'not-allowed' : 'pointer',
+                                  fontSize: '12px',
+                                  fontWeight: 'bold',
+                                  opacity: sendingInvite === user.id ? 0.6 : 1
+                                }}
+                              >
+                                {sendingInvite === user.id 
+                                  ? 'Sending...' 
+                                  : user.invite_sent 
+                                    ? 'Resend' 
+                                    : '📧 Send Invite'}
+                              </button>
+                              <button
+                                onClick={() => deletePendingUser(user.id)}
+                                style={{
+                                  padding: '6px 12px',
+                                  background: '#ef4444',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontSize: '12px'
+                                }}
+                              >
+                                Remove
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       )
