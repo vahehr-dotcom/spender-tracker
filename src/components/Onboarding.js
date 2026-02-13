@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { supabase } from '../supabaseClient'
 
 export default function Onboarding({ user, onComplete, onLogout }) {
   const [firstName, setFirstName] = useState('')
@@ -7,6 +8,7 @@ export default function Onboarding({ user, onComplete, onLogout }) {
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState('')
   const [prefilledFrom, setPrefilledFrom] = useState(null)
+  const [pendingData, setPendingData] = useState(null)
 
   useEffect(() => {
     if (user) {
@@ -17,7 +19,6 @@ export default function Onboarding({ user, onComplete, onLogout }) {
       let detectedAvatar = ''
       let source = null
 
-      // Google
       if (metadata.full_name || metadata.name) {
         const fullName = metadata.full_name || metadata.name
         const parts = fullName.split(' ')
@@ -38,7 +39,6 @@ export default function Onboarding({ user, onComplete, onLogout }) {
         detectedAvatar = metadata.avatar_url || metadata.picture
       }
 
-      // Apple
       if (metadata.first_name) {
         detectedFirstName = metadata.first_name
         source = 'Apple'
@@ -47,7 +47,6 @@ export default function Onboarding({ user, onComplete, onLogout }) {
         detectedLastName = metadata.last_name
       }
 
-      // Facebook
       if (metadata.first_name && !source) {
         detectedFirstName = metadata.first_name
         source = 'Facebook'
@@ -64,9 +63,29 @@ export default function Onboarding({ user, onComplete, onLogout }) {
         setAvatarUrl(detectedAvatar)
       }
 
+      // Check if user is in pending_users list
+      checkPendingUser(user.email)
+
       console.log('👤 OAuth data:', { metadata, detectedFirstName, detectedLastName, source })
     }
   }, [user])
+
+  const checkPendingUser = async (email) => {
+    try {
+      const { data, error } = await supabase
+        .from('pending_users')
+        .select('*')
+        .eq('email', email.toLowerCase())
+        .single()
+
+      if (data && !error) {
+        setPendingData(data)
+        console.log('🎉 Found pending user data:', data)
+      }
+    } catch (err) {
+      // Not in pending list, that's fine
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -85,12 +104,28 @@ export default function Onboarding({ user, onComplete, onLogout }) {
     setError('')
 
     try {
-      await onComplete({
+      // Build profile data with pending user settings if they exist
+      const profileData = {
         first_name: firstName.trim(),
         last_name: lastName.trim(),
         email: user.email,
         avatar_url: avatarUrl || null
-      })
+      }
+
+      // Apply pending user settings
+      if (pendingData) {
+        profileData.role = pendingData.role || 'user'
+        profileData.is_pro = pendingData.is_pro || false
+        console.log('🎉 Applying pending user settings:', { role: profileData.role, is_pro: profileData.is_pro })
+
+        // Delete from pending_users after applying
+        await supabase
+          .from('pending_users')
+          .delete()
+          .eq('id', pendingData.id)
+      }
+
+      await onComplete(profileData)
     } catch (err) {
       setError('Failed to save. Please try again.')
       setIsSaving(false)
@@ -150,7 +185,7 @@ export default function Onboarding({ user, onComplete, onLogout }) {
         </h1>
 
         <p style={{
-          margin: '0 0 40px',
+          margin: '0 0 20px',
           fontSize: '18px',
           color: '#6b7280'
         }}>
@@ -158,6 +193,23 @@ export default function Onboarding({ user, onComplete, onLogout }) {
             ? `We got your info from ${prefilledFrom}. Confirm or update below.`
             : "Let's personalize your experience. What should Nova call you?"}
         </p>
+
+        {/* Show if user is pre-registered */}
+        {pendingData && (
+          <div style={{
+            padding: '12px 20px',
+            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            borderRadius: '12px',
+            marginBottom: '20px',
+            color: 'white',
+            fontSize: '14px'
+          }}>
+            🎉 You've been pre-registered! 
+            {pendingData.is_pro && ' PRO access included.'}
+            {pendingData.role === 'tester' && ' Tester access enabled.'}
+            {pendingData.role === 'admin' && ' Admin access enabled.'}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '20px', textAlign: 'left' }}>
