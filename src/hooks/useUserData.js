@@ -1,24 +1,6 @@
 import { useState, useCallback } from 'react'
 import { supabase } from '../supabaseClient'
 
-const PRO_EMAILS = [
-  'lifeliftusa@gmail.com',
-  'vahehr@gmail.com',
-  'awillie2006@gmail.com',
-  'sako3000@gmail.com'
-]
-
-const ADMIN_EMAILS = [
-  'lifeliftusa@gmail.com'
-]
-
-const TESTER_EMAILS = [
-  'lifeliftusa@gmail.com',
-  'vahehr@gmail.com',
-  'awillie2006@gmail.com',
-  'sako3000@gmail.com'
-]
-
 export function useUserData() {
   const [userRole, setUserRole] = useState('user')
   const [userProfile, setUserProfile] = useState(null)
@@ -29,18 +11,17 @@ export function useUserData() {
   const loadUserRole = useCallback(async (userId) => {
     try {
       const { data, error } = await supabase
-        .from('user_preferences')
-        .select('preference_value')
-        .eq('user_id', userId)
-        .eq('preference_type', 'role')
+        .from('user_profiles')
+        .select('role')
+        .eq('id', userId)
         .single()
 
-      if (error) {
+      if (error || !data) {
         setUserRole('user')
         return 'user'
       }
 
-      const role = data?.preference_value || 'user'
+      const role = data.role || 'user'
       setUserRole(role)
       return role
     } catch (err) {
@@ -136,25 +117,20 @@ export function useUserData() {
     }
   }, [])
 
-  const loadSubscription = useCallback(async (email) => {
-    if (PRO_EMAILS.includes(email)) {
-      setSubscriptionStatus('pro')
-      return 'pro'
-    }
-
+  const loadSubscription = useCallback(async (userId) => {
     try {
       const { data, error } = await supabase
-        .from('subscriptions')
-        .select('status')
-        .eq('email', email)
+        .from('user_profiles')
+        .select('is_pro')
+        .eq('id', userId)
         .single()
 
-      if (error) {
+      if (error || !data) {
         setSubscriptionStatus('basic')
         return 'basic'
       }
 
-      const status = data?.status || 'basic'
+      const status = data.is_pro ? 'pro' : 'basic'
       setSubscriptionStatus(status)
       return status
     } catch (err) {
@@ -212,30 +188,31 @@ export function useUserData() {
     }
   }, [])
 
-  const isAdmin = useCallback((email) => {
-    return ADMIN_EMAILS.includes(email) || userRole === 'admin'
-  }, [userRole])
+  const isAdmin = useCallback(() => {
+    return userRole === 'admin' || userProfile?.role === 'admin'
+  }, [userRole, userProfile])
 
-  const isTester = useCallback((email) => {
-    return TESTER_EMAILS.includes(email)
-  }, [])
+  const isTester = useCallback(() => {
+    return userRole === 'tester' || userRole === 'admin' || userProfile?.role === 'tester' || userProfile?.role === 'admin'
+  }, [userRole, userProfile])
 
   const loadAllUserData = useCallback(async (userId, email) => {
     console.log('🔄 loadAllUserData called:', userId, email)
-    const results = await Promise.all([
+    
+    const [role, profile, subscription, cats] = await Promise.all([
       loadUserRole(userId),
       loadUserProfile(userId, email),
-      loadSubscription(email),
+      loadSubscription(userId),
       loadCategories(userId)
     ])
 
-    console.log('🔄 loadAllUserData results:', results)
+    console.log('🔄 loadAllUserData results:', { role, profile, subscription, categories: cats?.length })
 
     return {
-      role: results[0],
-      profile: results[1],
-      subscription: results[2],
-      categories: results[3]
+      role,
+      profile,
+      subscription,
+      categories: cats
     }
   }, [loadUserRole, loadUserProfile, loadSubscription, loadCategories])
 

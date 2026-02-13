@@ -280,11 +280,11 @@ function MainApp() {
           boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
           marginBottom: '20px'
         }}>
-          <Header
+         <Header
             userProfile={userProfile}
             userEmail={session.user.email}
-            isAdmin={isAdmin(session.user.email)}
-            isTester={isTester(session.user.email)}
+            isAdmin={isAdmin()}
+            isTester={isTester()}
             isProMode={isProMode}
             testMode={testMode}
             onTestModeToggle={() => setTestMode(!testMode)}

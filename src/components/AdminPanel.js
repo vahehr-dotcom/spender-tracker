@@ -16,7 +16,7 @@ export default function AdminPanel({ onClose }) {
     try {
       const { data, error } = await supabase
         .from('user_profiles')
-        .select('id, email, first_name, last_name, is_pro, created_at')
+        .select('id, email, first_name, last_name, is_pro, role, created_at')
         .order('created_at', { ascending: false })
 
       if (error) throw error
@@ -28,7 +28,7 @@ export default function AdminPanel({ onClose }) {
   }
 
   const toggleProStatus = async (userId, currentStatus) => {
-    setUpdating(userId)
+    setUpdating(userId + '-pro')
     try {
       const { error } = await supabase
         .from('user_profiles')
@@ -47,6 +47,26 @@ export default function AdminPanel({ onClose }) {
     setUpdating(null)
   }
 
+  const changeRole = async (userId, newRole) => {
+    setUpdating(userId + '-role')
+    try {
+      const { error } = await supabase
+        .from('user_profiles')
+        .update({ role: newRole })
+        .eq('id', userId)
+
+      if (error) throw error
+
+      setUsers(users.map(u => 
+        u.id === userId ? { ...u, role: newRole } : u
+      ))
+    } catch (err) {
+      console.error('Change role error:', err)
+      alert('Failed to update user role')
+    }
+    setUpdating(null)
+  }
+
   const filteredUsers = users.filter(user => {
     if (!searchTerm) return true
     const search = searchTerm.toLowerCase()
@@ -56,6 +76,17 @@ export default function AdminPanel({ onClose }) {
       user.last_name?.toLowerCase().includes(search)
     )
   })
+
+  const getRoleBadge = (role) => {
+    switch (role) {
+      case 'admin':
+        return { bg: 'linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)', label: '👑 Admin' }
+      case 'tester':
+        return { bg: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', label: '🧪 Tester' }
+      default:
+        return { bg: '#e5e7eb', label: 'User', textColor: '#6b7280' }
+    }
+  }
 
   return (
     <div style={{
@@ -75,9 +106,9 @@ export default function AdminPanel({ onClose }) {
         background: 'white',
         borderRadius: '16px',
         padding: '30px',
-        maxWidth: '900px',
+        maxWidth: '1100px',
         width: '100%',
-        maxHeight: '80vh',
+        maxHeight: '85vh',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column'
@@ -143,71 +174,108 @@ export default function AdminPanel({ onClose }) {
                 <tr style={{ background: '#f3f4f6' }}>
                   <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>User</th>
                   <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Email</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Status</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Action</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Role</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>PRO Status</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredUsers.map(user => (
-                  <tr key={user.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                    <td style={{ padding: '12px 16px' }}>
-                      <strong>{user.first_name} {user.last_name}</strong>
-                    </td>
-                    <td style={{ padding: '12px 16px', color: '#6b7280' }}>
-                      {user.email}
-                    </td>
-                    <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                      {user.is_pro ? (
+                {filteredUsers.map(user => {
+                  const roleBadge = getRoleBadge(user.role)
+                  return (
+                    <tr key={user.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                      <td style={{ padding: '12px 16px' }}>
+                        <strong>{user.first_name} {user.last_name}</strong>
+                      </td>
+                      <td style={{ padding: '12px 16px', color: '#6b7280' }}>
+                        {user.email}
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                         <span style={{
                           padding: '4px 12px',
-                          background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                          color: 'white',
+                          background: roleBadge.bg,
+                          color: roleBadge.textColor || 'white',
                           borderRadius: '20px',
                           fontSize: '12px',
                           fontWeight: 'bold'
                         }}>
-                          ✓ PRO
+                          {roleBadge.label}
                         </span>
-                      ) : (
-                        <span style={{
-                          padding: '4px 12px',
-                          background: '#e5e7eb',
-                          color: '#6b7280',
-                          borderRadius: '20px',
-                          fontSize: '12px',
-                          fontWeight: 'bold'
-                        }}>
-                          Basic
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                      <button
-                        onClick={() => toggleProStatus(user.id, user.is_pro)}
-                        disabled={updating === user.id}
-                        style={{
-                          padding: '8px 16px',
-                          background: user.is_pro 
-                            ? '#ef4444' 
-                            : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: updating === user.id ? 'not-allowed' : 'pointer',
-                          fontWeight: 'bold',
-                          fontSize: '13px',
-                          opacity: updating === user.id ? 0.6 : 1
-                        }}
-                      >
-                        {updating === user.id 
-                          ? '...' 
-                          : user.is_pro 
-                            ? 'Revoke PRO' 
-                            : 'Grant PRO'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        {user.is_pro ? (
+                          <span style={{
+                            padding: '4px 12px',
+                            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                            color: 'white',
+                            borderRadius: '20px',
+                            fontSize: '12px',
+                            fontWeight: 'bold'
+                          }}>
+                            ✓ PRO
+                          </span>
+                        ) : (
+                          <span style={{
+                            padding: '4px 12px',
+                            background: '#e5e7eb',
+                            color: '#6b7280',
+                            borderRadius: '20px',
+                            fontSize: '12px',
+                            fontWeight: 'bold'
+                          }}>
+                            Basic
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                          <select
+                            value={user.role || 'user'}
+                            onChange={(e) => changeRole(user.id, e.target.value)}
+                            disabled={updating === user.id + '-role'}
+                            style={{
+                              padding: '6px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid #d1d5db',
+                              fontSize: '13px',
+                              cursor: 'pointer',
+                              background: 'white'
+                            }}
+                          >
+                            <option value="user">User</option>
+                            <option value="tester">Tester</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                          
+                          <button
+                            onClick={() => toggleProStatus(user.id, user.is_pro)}
+                            disabled={updating === user.id + '-pro'}
+                            style={{
+                              padding: '6px 12px',
+                              background: user.is_pro 
+                                ? '#ef4444' 
+                                : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '6px',
+                              cursor: updating === user.id + '-pro' ? 'not-allowed' : 'pointer',
+                              fontWeight: 'bold',
+                              fontSize: '12px',
+                              opacity: updating === user.id + '-pro' ? 0.6 : 1,
+                              minWidth: '90px'
+                            }}
+                          >
+                            {updating === user.id + '-pro'
+                              ? '...' 
+                              : user.is_pro 
+                                ? 'Revoke PRO' 
+                                : 'Grant PRO'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           )}
@@ -220,9 +288,15 @@ export default function AdminPanel({ onClose }) {
           borderRadius: '8px',
           fontSize: '14px',
           color: '#6b7280',
-          textAlign: 'center'
+          display: 'flex',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '10px'
         }}>
-          Total users: {users.length} | PRO users: {users.filter(u => u.is_pro).length}
+          <span>Total users: {users.length}</span>
+          <span>PRO users: {users.filter(u => u.is_pro).length}</span>
+          <span>Testers: {users.filter(u => u.role === 'tester').length}</span>
+          <span>Admins: {users.filter(u => u.role === 'admin').length}</span>
         </div>
       </div>
     </div>
