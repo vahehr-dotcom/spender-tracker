@@ -1,10 +1,76 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 export default function Onboarding({ user, onComplete, onLogout }) {
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
+  const [avatarUrl, setAvatarUrl] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState('')
+  const [prefilledFrom, setPrefilledFrom] = useState(null)
+
+  useEffect(() => {
+    if (user) {
+      const metadata = user.user_metadata || {}
+      
+      // Try to get name from OAuth providers
+      let detectedFirstName = ''
+      let detectedLastName = ''
+      let detectedAvatar = ''
+      let source = null
+
+      // Google
+      if (metadata.full_name || metadata.name) {
+        const fullName = metadata.full_name || metadata.name
+        const parts = fullName.split(' ')
+        detectedFirstName = parts[0] || ''
+        detectedLastName = parts.slice(1).join(' ') || ''
+        source = 'Google'
+      }
+
+      // Given name / Family name (Google sometimes uses these)
+      if (metadata.given_name) {
+        detectedFirstName = metadata.given_name
+        source = 'Google'
+      }
+      if (metadata.family_name) {
+        detectedLastName = metadata.family_name
+      }
+
+      // Avatar
+      if (metadata.avatar_url || metadata.picture) {
+        detectedAvatar = metadata.avatar_url || metadata.picture
+      }
+
+      // Apple (often provides name differently)
+      if (metadata.first_name) {
+        detectedFirstName = metadata.first_name
+        source = 'Apple'
+      }
+      if (metadata.last_name) {
+        detectedLastName = metadata.last_name
+      }
+
+      // Facebook
+      if (metadata.first_name && !source) {
+        detectedFirstName = metadata.first_name
+        source = 'Facebook'
+      }
+
+      // Set state
+      if (detectedFirstName) {
+        setFirstName(detectedFirstName)
+        setPrefilledFrom(source)
+      }
+      if (detectedLastName) {
+        setLastName(detectedLastName)
+      }
+      if (detectedAvatar) {
+        setAvatarUrl(detectedAvatar)
+      }
+
+      console.log('👤 OAuth data:', { metadata, detectedFirstName, detectedLastName, source })
+    }
+  }, [user])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -21,7 +87,8 @@ export default function Onboarding({ user, onComplete, onLogout }) {
       await onComplete({
         first_name: firstName.trim(),
         last_name: lastName.trim(),
-        email: user.email
+        email: user.email,
+        avatar_url: avatarUrl || null
       })
     } catch (err) {
       setError('Failed to save. Please try again.')
@@ -47,19 +114,29 @@ export default function Onboarding({ user, onComplete, onLogout }) {
         boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
         textAlign: 'center'
       }}>
-        {/* Welcome Icon */}
+        {/* Avatar or Welcome Icon */}
         <div style={{
           width: '80px',
           height: '80px',
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          background: avatarUrl ? 'transparent' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
           borderRadius: '50%',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
           margin: '0 auto 30px',
-          fontSize: '40px'
+          fontSize: '40px',
+          overflow: 'hidden',
+          border: avatarUrl ? '3px solid #667eea' : 'none'
         }}>
-          👋
+          {avatarUrl ? (
+            <img 
+              src={avatarUrl} 
+              alt="Profile" 
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          ) : (
+            '👋'
+          )}
         </div>
 
         <h1 style={{
@@ -68,7 +145,7 @@ export default function Onboarding({ user, onComplete, onLogout }) {
           fontWeight: 700,
           color: '#1f2937'
         }}>
-          Welcome to Spender Tracker!
+          {firstName ? `Hey ${firstName}!` : 'Welcome to Spender Tracker!'}
         </h1>
 
         <p style={{
@@ -76,7 +153,9 @@ export default function Onboarding({ user, onComplete, onLogout }) {
           fontSize: '18px',
           color: '#6b7280'
         }}>
-          Let's personalize your experience. What should Nova call you?
+          {prefilledFrom 
+            ? `We got your info from ${prefilledFrom}. Confirm or update below.`
+            : "Let's personalize your experience. What should Nova call you?"}
         </p>
 
         <form onSubmit={handleSubmit}>
@@ -95,7 +174,7 @@ export default function Onboarding({ user, onComplete, onLogout }) {
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
               placeholder="Enter your first name"
-              autoFocus
+              autoFocus={!firstName}
               style={{
                 width: '100%',
                 padding: '14px 16px',
@@ -104,11 +183,17 @@ export default function Onboarding({ user, onComplete, onLogout }) {
                 borderRadius: '12px',
                 boxSizing: 'border-box',
                 transition: 'border-color 0.2s',
-                outline: 'none'
+                outline: 'none',
+                background: prefilledFrom ? '#f0fdf4' : 'white'
               }}
               onFocus={(e) => e.target.style.borderColor = '#667eea'}
               onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
             />
+            {prefilledFrom && firstName && (
+              <p style={{ fontSize: '12px', color: '#10b981', marginTop: '6px' }}>
+                ✓ Pre-filled from {prefilledFrom}
+              </p>
+            )}
           </div>
 
           <div style={{ marginBottom: '30px', textAlign: 'left' }}>
@@ -134,7 +219,8 @@ export default function Onboarding({ user, onComplete, onLogout }) {
                 borderRadius: '12px',
                 boxSizing: 'border-box',
                 transition: 'border-color 0.2s',
-                outline: 'none'
+                outline: 'none',
+                background: prefilledFrom && lastName ? '#f0fdf4' : 'white'
               }}
               onFocus={(e) => e.target.style.borderColor = '#667eea'}
               onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
@@ -175,7 +261,7 @@ export default function Onboarding({ user, onComplete, onLogout }) {
             onMouseOver={(e) => !isSaving && (e.target.style.transform = 'translateY(-2px)')}
             onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
           >
-            {isSaving ? 'Saving...' : 'Get Started →'}
+            {isSaving ? 'Saving...' : prefilledFrom ? 'Looks Good! →' : 'Get Started →'}
           </button>
         </form>
 
