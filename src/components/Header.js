@@ -11,7 +11,8 @@ export default function Header({
   onImport,
   onExport,
   onLogout,
-  onUpgrade
+  onUpgrade,
+  onOpenAdmin
 }) {
   const navigate = useNavigate()
 
@@ -82,6 +83,20 @@ export default function Header({
         {isAdmin && (
           <>
             <button
+              onClick={onOpenAdmin}
+              style={{
+                padding: '10px 15px',
+                background: 'linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              👑 Admin
+            </button>
+            <button
               onClick={() => navigate('/login-history')}
               style={{
                 padding: '10px 15px',
@@ -123,6 +138,7 @@ export default function Header({
         >
           📥 Import
         </button>
+
         <button
           onClick={onExport}
           style={{
@@ -136,6 +152,7 @@ export default function Header({
         >
           📤 Export
         </button>
+
         <button
           onClick={onLogout}
           style={{

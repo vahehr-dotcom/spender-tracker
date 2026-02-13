@@ -11,6 +11,7 @@ import MonthlySummary from './components/MonthlySummary'
 import FileImport from './components/FileImport'
 import ImportPreview from './components/ImportPreview'
 import UpgradeModal from './components/UpgradeModal'
+import AdminPanel from './components/AdminPanel'
 import AnalyticsDashboard from './components/AnalyticsDashboard'
 import LoginHistoryPage from './pages/LoginHistoryPage'
 
@@ -67,6 +68,7 @@ function MainApp() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [showUpgrade, setShowUpgrade] = useState(false)
+  const [showAdmin, setShowAdmin] = useState(false)
   const [parsedTransactions, setParsedTransactions] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [showArchived, setShowArchived] = useState(false)
@@ -290,6 +292,7 @@ function MainApp() {
             onExport={handleExport}
             onLogout={handleLogout}
             onUpgrade={() => setShowUpgrade(true)}
+            onOpenAdmin={() => setShowAdmin(true)}
           />
 
           {!isProMode && (
@@ -484,6 +487,7 @@ function MainApp() {
       )}
 
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
+      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
     </div>
   )
 }

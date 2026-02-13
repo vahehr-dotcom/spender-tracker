@@ -12,7 +12,6 @@ export default function Onboarding({ user, onComplete, onLogout }) {
     if (user) {
       const metadata = user.user_metadata || {}
       
-      // Try to get name from OAuth providers
       let detectedFirstName = ''
       let detectedLastName = ''
       let detectedAvatar = ''
@@ -27,7 +26,6 @@ export default function Onboarding({ user, onComplete, onLogout }) {
         source = 'Google'
       }
 
-      // Given name / Family name (Google sometimes uses these)
       if (metadata.given_name) {
         detectedFirstName = metadata.given_name
         source = 'Google'
@@ -36,12 +34,11 @@ export default function Onboarding({ user, onComplete, onLogout }) {
         detectedLastName = metadata.family_name
       }
 
-      // Avatar
       if (metadata.avatar_url || metadata.picture) {
         detectedAvatar = metadata.avatar_url || metadata.picture
       }
 
-      // Apple (often provides name differently)
+      // Apple
       if (metadata.first_name) {
         detectedFirstName = metadata.first_name
         source = 'Apple'
@@ -56,7 +53,6 @@ export default function Onboarding({ user, onComplete, onLogout }) {
         source = 'Facebook'
       }
 
-      // Set state
       if (detectedFirstName) {
         setFirstName(detectedFirstName)
         setPrefilledFrom(source)
@@ -77,6 +73,11 @@ export default function Onboarding({ user, onComplete, onLogout }) {
     
     if (!firstName.trim()) {
       setError('Please enter your first name')
+      return
+    }
+
+    if (!lastName.trim()) {
+      setError('Please enter your last name')
       return
     }
 
@@ -167,7 +168,7 @@ export default function Onboarding({ user, onComplete, onLogout }) {
               fontWeight: 600,
               color: '#374151'
             }}>
-              First Name *
+              First Name <span style={{ color: '#ef4444' }}>*</span>
             </label>
             <input
               type="text"
@@ -204,7 +205,7 @@ export default function Onboarding({ user, onComplete, onLogout }) {
               fontWeight: 600,
               color: '#374151'
             }}>
-              Last Name (optional)
+              Last Name <span style={{ color: '#ef4444' }}>*</span>
             </label>
             <input
               type="text"
