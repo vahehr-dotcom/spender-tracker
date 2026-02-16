@@ -17,20 +17,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Generate a magic link for signup
-    const { data, error } = await supabase.auth.admin.generateLink({
-      type: 'magiclink',
-      email: email,
-      options: {
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://spender-tracker.vercel.app'}/`
-      }
-    })
-
-    if (error) throw error
-
-    // Send custom invite email using Supabase's email
-    const { error: emailError } = await supabase.auth.admin.inviteUserByEmail(email, {
-      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://spender-tracker.vercel.app'}/`,
+    const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, {
+      redirectTo: 'https://spender-tracker.vercel.app/',
       data: {
         invited: true,
         role: role || 'user',
@@ -38,20 +26,27 @@ export default async function handler(req, res) {
       }
     })
 
-    if (emailError) throw emailError
+    if (error) throw error
 
-    // Update pending_users to mark invite as sent
+    // Mark invite as sent in pending_users
     await supabase
       .from('pending_users')
-      .update({ 
-        invite_sent: true, 
-        invite_sent_at: new Date().toISOString() 
+      .update({
+        invite_sent: true,
+        invite_sent_at: new Date().toISOString()
       })
       .eq('email', email.toLowerCase())
 
     return res.status(200).json({ success: true, message: 'Invite sent!' })
   } catch (error) {
     console.error('Send invite error:', error)
-    return res.status(500).json({ error: error.message })
+    return res.status(500).json({ error: error.message || 'Failed to send invite' })
   }
 }
+```
+
+**What changed:**
+- Removed the redundant `generateLink` call that was running before `inviteUserByEmail` (was burning your rate limit for nothing)
+- Hardcoded the redirect URL instead of relying on an env var that may not exist
+- Added `|| 'Failed to send invite'` fallback so the response is always valid JSON even if `error.message` is undefined
+
