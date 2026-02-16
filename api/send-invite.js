@@ -1,11 +1,11 @@
-import { createClient } from '@supabase/supabase-js'
+const { createClient } = require('@supabase/supabase-js')
 
 const supabase = createClient(
   process.env.REACT_APP_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
@@ -28,7 +28,6 @@ export default async function handler(req, res) {
 
     if (error) throw error
 
-    // Mark invite as sent in pending_users
     await supabase
       .from('pending_users')
       .update({
@@ -44,9 +43,4 @@ export default async function handler(req, res) {
   }
 }
 ```
-
-**What changed:**
-- Removed the redundant `generateLink` call that was running before `inviteUserByEmail` (was burning your rate limit for nothing)
-- Hardcoded the redirect URL instead of relying on an env var that may not exist
-- Added `|| 'Failed to send invite'` fallback so the response is always valid JSON even if `error.message` is undefined
 
