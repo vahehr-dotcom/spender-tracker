@@ -113,6 +113,12 @@ function MainApp() {
     return result
   }
 
+  const getLocalISOString = (date) => {
+    const offset = date.getTimezoneOffset()
+    const localDate = new Date(date.getTime() - offset * 60000)
+    return localDate.toISOString().slice(0, -1)
+  }
+
   const allExpenses = showArchived ? expenses : expenses.filter(e => !e.archived)
   const filteredExpenses = allExpenses.filter(expense => {
     if (!searchTerm) return true
@@ -132,12 +138,11 @@ function MainApp() {
     console.log('🎯 handleAICommand called:', action, data)
 
     if (action === 'add_expense') {
-      let spentAt = new Date().toISOString()
+      let now = new Date()
       if (data.dateHint === 'yesterday') {
-        const yesterday = new Date()
-        yesterday.setDate(yesterday.getDate() - 1)
-        spentAt = yesterday.toISOString()
+        now.setDate(now.getDate() - 1)
       }
+      const spentAt = getLocalISOString(now)
 
       const currentCategories = categoriesRef.current || []
       const defaultCategoryId = currentCategories.length > 0 ? currentCategories[0].id : null
