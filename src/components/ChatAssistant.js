@@ -511,8 +511,3 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 }
 
 export default ChatAssistant
-```
-
-Save the file. Then:
-```
-cd C:\Users\Vahe\spender-tracker && git add . && git commit -m "Fix stale onAICommand ref in ChatAssistant" && git push origin main
