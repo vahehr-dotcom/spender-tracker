@@ -76,6 +76,9 @@ function MainApp() {
 
   const navigate = useNavigate()
 
+  const categoriesRef = React.useRef(categories)
+  useEffect(() => { categoriesRef.current = categories }, [categories])
+
   useEffect(() => {
     if (session?.user) {
       const initializeUser = async () => {
@@ -136,8 +139,9 @@ function MainApp() {
         spentAt = yesterday.toISOString()
       }
 
-      const defaultCategoryId = categories.length > 0 ? categories[0].id : null
-      console.log('📂 Categories available:', categories.length, 'Default ID:', defaultCategoryId)
+      const currentCategories = categoriesRef.current || []
+      const defaultCategoryId = currentCategories.length > 0 ? currentCategories[0].id : null
+      console.log('📂 Categories available:', currentCategories.length, 'Default ID:', defaultCategoryId)
       
       if (!defaultCategoryId) {
         console.error('❌ No categories available')
