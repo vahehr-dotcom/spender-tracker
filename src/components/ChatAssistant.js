@@ -24,6 +24,11 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
   const expensesRef = useRef(expenses)
   const categoriesRef = useRef(categories)
   const initLockRef = useRef(false)
+  const onAICommandRef = useRef(onAICommand)
+
+  useEffect(() => {
+    onAICommandRef.current = onAICommand
+  }, [onAICommand])
 
   useEffect(() => {
     expensesRef.current = expenses
@@ -47,32 +52,32 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       const tools = {
         add_expense: async (params) => {
           try {
-            const result = await onAICommand({ action: 'add_expense', data: params })
-            return { success: true, data: result }
+            const result = await onAICommandRef.current({ action: 'add_expense', data: params })
+            return result
           } catch (error) {
             return { success: false, error: error.message }
           }
         },
         search: async (params) => {
           try {
-            const result = await onAICommand({ action: 'search', data: { term: params.query } })
-            return { success: true, data: result }
+            const result = await onAICommandRef.current({ action: 'search', data: { term: params.query } })
+            return result
           } catch (error) {
             return { success: false, error: error.message }
           }
         },
         export: async () => {
           try {
-            const result = await onAICommand({ action: 'export', data: {} })
-            return { success: true, data: result }
+            const result = await onAICommandRef.current({ action: 'export', data: {} })
+            return result
           } catch (error) {
             return { success: false, error: error.message }
           }
         },
         update_expense: async (params) => {
           try {
-            const result = await onAICommand({ action: 'update_expense', data: params })
-            return { success: true, data: result }
+            const result = await onAICommandRef.current({ action: 'update_expense', data: params })
+            return result
           } catch (error) {
             return { success: false, error: error.message }
           }
@@ -101,7 +106,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     }
 
     initNova()
-  }, [userId, onAICommand])
+  }, [userId])
 
   useEffect(() => {
     if (!userId || !userProfile || !isInitialized || hasGreeted) return
@@ -506,3 +511,8 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 }
 
 export default ChatAssistant
+```
+
+Save the file. Then:
+```
+cd C:\Users\Vahe\spender-tracker && git add . && git commit -m "Fix stale onAICommand ref in ChatAssistant" && git push origin main
