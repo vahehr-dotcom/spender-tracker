@@ -114,9 +114,17 @@ function MainApp() {
   }
 
   const getLocalISOString = (date) => {
-    const offset = date.getTimezoneOffset()
-    const localDate = new Date(date.getTime() - offset * 60000)
-    return localDate.toISOString().slice(0, -1)
+    const offset = -date.getTimezoneOffset()
+    const sign = offset >= 0 ? '+' : '-'
+    const hours = String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0')
+    const minutes = String(Math.abs(offset) % 60).padStart(2, '0')
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hour = String(date.getHours()).padStart(2, '0')
+    const min = String(date.getMinutes()).padStart(2, '0')
+    const sec = String(date.getSeconds()).padStart(2, '0')
+    return `${year}-${month}-${day}T${hour}:${min}:${sec}${sign}${hours}:${minutes}`
   }
 
   const allExpenses = showArchived ? expenses : expenses.filter(e => !e.archived)
