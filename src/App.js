@@ -128,6 +128,16 @@ function MainApp() {
     return `${year}-${month}-${day}T${hour}:${min}:${sec}${sign}${hours}:${minutes}`
   }
 
+  const findCategoryId = (categoryHint, allCategories) => {
+    if (!categoryHint || !allCategories || allCategories.length === 0) return null
+    const match = allCategories.find(c => c.name === categoryHint)
+    if (match) return match.id
+    const lower = categoryHint.toLowerCase()
+    const fuzzy = allCategories.find(c => c.name.toLowerCase().includes(lower) || lower.includes(c.name.toLowerCase()))
+    if (fuzzy) return fuzzy.id
+    return null
+  }
+
   const allExpenses = showArchived ? expenses : expenses.filter(e => !e.archived)
   const filteredExpenses = allExpenses.filter(expense => {
     if (!searchTerm) return true
@@ -154,10 +164,19 @@ function MainApp() {
       const spentAt = getLocalISOString(now)
 
       const currentCategories = categoriesRef.current || []
-      const defaultCategoryId = currentCategories.length > 0 ? currentCategories[0].id : null
-      console.log('📂 Categories available:', currentCategories.length, 'Default ID:', defaultCategoryId)
       
-      if (!defaultCategoryId) {
+      let categoryId = null
+      if (data.categoryHint) {
+        categoryId = findCategoryId(data.categoryHint, currentCategories)
+        console.log('🏷️ Category hint:', data.categoryHint, '→ ID:', categoryId)
+      }
+      if (!categoryId) {
+        const miscCategory = currentCategories.find(c => c.name === 'Miscellaneous' && c.parent_id === null)
+        categoryId = miscCategory ? miscCategory.id : (currentCategories.length > 0 ? currentCategories[0].id : null)
+        console.log('🏷️ Fallback category ID:', categoryId)
+      }
+      
+      if (!categoryId) {
         console.error('❌ No categories available')
         return { success: false, error: 'No categories available' }
       }
@@ -166,7 +185,7 @@ function MainApp() {
         user_id: session.user.id,
         amount: parseFloat(data.amount),
         merchant: data.merchant,
-        category_id: defaultCategoryId,
+        category_id: categoryId,
         spent_at: spentAt,
         payment_method: 'card',
         archived: false
