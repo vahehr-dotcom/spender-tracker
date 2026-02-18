@@ -11,7 +11,7 @@ function getNowLocalDateTime() {
   return `${year}-${month}-${day}T${hours}:${minutes}`
 }
 
-export default function AddExpenseForm({ categories, onAddExpense, isProMode, onUpgradeToPro, userId }) {
+export default function AddExpenseForm({ categories, mainCategories = [], onAddExpense, isProMode, onUpgradeToPro, userId }) {
   const [amount, setAmount] = useState('')
   const [merchant, setMerchant] = useState('')
   const [spentAtLocal, setSpentAtLocal] = useState(getNowLocalDateTime())
@@ -22,6 +22,7 @@ export default function AddExpenseForm({ categories, onAddExpense, isProMode, on
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState('')
+  const [newCategoryParent, setNewCategoryParent] = useState('')
 
   const handleSave = async () => {
     if (!amount || !merchant || !categoryId) {
@@ -67,7 +68,8 @@ export default function AddExpenseForm({ categories, onAddExpense, isProMode, on
         .insert({
           user_id: userId,
           name: newCategoryName.trim(),
-          is_custom: true
+          is_custom: true,
+          parent_id: newCategoryParent || null
         })
         .select()
         .single()
@@ -75,6 +77,7 @@ export default function AddExpenseForm({ categories, onAddExpense, isProMode, on
       if (error) throw error
 
       setNewCategoryName('')
+      setNewCategoryParent('')
       setShowAddCategory(false)
       setCategoryId(data.id)
       window.location.reload()
@@ -85,6 +88,8 @@ export default function AddExpenseForm({ categories, onAddExpense, isProMode, on
 
   const customCategoryCount = categories.filter(c => c.is_custom && c.user_id === userId).length
   const canAddCategory = isProMode || customCategoryCount < 3
+
+  const hasGroupedCategories = mainCategories && mainCategories.length > 0
 
   return (
     <div>
@@ -181,9 +186,20 @@ export default function AddExpenseForm({ categories, onAddExpense, isProMode, on
           }}
         >
           <option value="">-- Select Category --</option>
-          {categories.map((cat) => (
-            <option key={cat.id} value={cat.id}>{cat.name}</option>
-          ))}
+          {hasGroupedCategories ? (
+            mainCategories.map((main) => (
+              <optgroup key={main.id} label={main.name}>
+                <option value={main.id}>{main.name} (General)</option>
+                {main.subcategories && main.subcategories.map((sub) => (
+                  <option key={sub.id} value={sub.id}>{sub.name}</option>
+                ))}
+              </optgroup>
+            ))
+          ) : (
+            categories.filter(c => c.parent_id === null).map((cat) => (
+              <option key={cat.id} value={cat.id}>{cat.name}</option>
+            ))
+          )}
         </select>
 
         <div style={{ marginTop: '10px' }}>
@@ -233,6 +249,24 @@ export default function AddExpenseForm({ categories, onAddExpense, isProMode, on
             borderRadius: '8px',
             background: '#f9fafb'
           }}>
+            <select
+              value={newCategoryParent}
+              onChange={(e) => setNewCategoryParent(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px',
+                fontSize: '14px',
+                border: '1px solid #ddd',
+                borderRadius: '6px',
+                marginBottom: '10px',
+                boxSizing: 'border-box'
+              }}
+            >
+              <option value="">Add as main category</option>
+              {mainCategories.map(main => (
+                <option key={main.id} value={main.id}>Add under: {main.name}</option>
+              ))}
+            </select>
             <input
               type="text"
               value={newCategoryName}
@@ -264,7 +298,7 @@ export default function AddExpenseForm({ categories, onAddExpense, isProMode, on
                 Save
               </button>
               <button
-                onClick={() => setShowAddCategory(false)}
+                onClick={() => { setShowAddCategory(false); setNewCategoryParent('') }}
                 style={{
                   padding: '8px 15px',
                   border: '1px solid #ddd',

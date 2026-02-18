@@ -46,6 +46,7 @@ function MainApp() {
     userProfile,
     subscriptionStatus,
     categories,
+    mainCategories,
     loadAllUserData,
     checkOnboardingStatus,
     saveUserProfile,
@@ -384,6 +385,7 @@ function MainApp() {
           <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
             <AddExpenseForm
               categories={categories}
+              mainCategories={mainCategories}
               onAddExpense={handleAddExpense}
               isProMode={isProMode}
               onUpgradeToPro={() => setShowUpgrade(true)}

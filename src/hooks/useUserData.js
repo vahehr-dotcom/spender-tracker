@@ -6,6 +6,7 @@ export function useUserData() {
   const [userProfile, setUserProfile] = useState(null)
   const [subscriptionStatus, setSubscriptionStatus] = useState('basic')
   const [categories, setCategories] = useState([])
+  const [mainCategories, setMainCategories] = useState([])
   const [profileLoading, setProfileLoading] = useState(true)
 
   const loadUserRole = useCallback(async (userId) => {
@@ -145,43 +146,67 @@ export function useUserData() {
       const { data, error } = await supabase
         .from('categories')
         .select('*')
-        .order('name')
+        .order('sort_order')
 
       console.log('📂 Categories query result:', { data, error })
 
       if (error) {
         console.error('📂 Categories error:', error)
         setCategories([])
+        setMainCategories([])
         return []
       }
 
       const filtered = data.filter(c => c.user_id === null || c.user_id === userId)
-      console.log('📂 Filtered categories:', filtered.length)
       
+      const mains = filtered.filter(c => c.parent_id === null)
+      const subs = filtered.filter(c => c.parent_id !== null)
+
+      const grouped = mains.map(main => ({
+        ...main,
+        subcategories: subs.filter(s => s.parent_id === main.id).sort((a, b) => a.sort_order - b.sort_order)
+      }))
+
+      console.log('📂 Main categories:', mains.length, 'Subcategories:', subs.length)
+
+      setMainCategories(grouped)
       setCategories(filtered)
       return filtered
     } catch (err) {
       console.error('📂 Load categories exception:', err)
       setCategories([])
+      setMainCategories([])
       return []
     }
   }, [])
 
-  const addCategory = useCallback(async (userId, name) => {
+  const addCategory = useCallback(async (userId, name, parentId = null) => {
     try {
       const { data, error } = await supabase
         .from('categories')
         .insert({
           user_id: userId,
           name: name.trim(),
-          is_custom: true
+          is_custom: true,
+          parent_id: parentId
         })
         .select()
         .single()
 
       if (error) throw error
 
-      setCategories(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
+      setCategories(prev => [...prev, data])
+      
+      if (parentId) {
+        setMainCategories(prev => prev.map(main => 
+          main.id === parentId 
+            ? { ...main, subcategories: [...main.subcategories, data] }
+            : main
+        ))
+      } else {
+        setMainCategories(prev => [...prev, { ...data, subcategories: [] }])
+      }
+
       return { success: true, category: data }
     } catch (err) {
       return { success: false, error: err.message }
@@ -221,6 +246,7 @@ export function useUserData() {
     userProfile,
     subscriptionStatus,
     categories,
+    mainCategories,
     profileLoading,
     loadUserRole,
     loadUserProfile,
