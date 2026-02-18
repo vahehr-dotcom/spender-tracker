@@ -284,16 +284,17 @@ Gently suggest PRO when user tries premium features.`
 
     let merchant = null
     
-    const atMatch = userMessage.match(/(?:at|to|for|in)\s+([a-z0-9\s&'-]+?)(?:\s+(?:today|yesterday|on|last)|\s*$)/i)
+    const atMatch = userMessage.match(/\b(?:at|to|for|in)\s+([a-z0-9\s&'-]+?)(?:\s+(?:today|yesterday|on|last)|\s*$)/i)
     if (atMatch) {
       merchant = atMatch[1].trim()
     }
     
     if (!merchant) {
       const afterAmount = userMessage.replace(/(?:add|spent)\s+\$?\d+(?:\.\d{2})?/i, '').trim()
-      const words = afterAmount.split(/\s+/).filter(w => 
-        !['at', 'to', 'for', 'in', 'today', 'yesterday', 'on'].includes(w.toLowerCase())
-      )
+      const words = afterAmount.split(/\s+/).filter(w => {
+        const cleaned = w.toLowerCase()
+        return cleaned.length > 0 && !(/^(at|to|for|in|today|yesterday|on)$/.test(cleaned))
+      })
       if (words.length > 0) {
         merchant = words.join(' ')
       }
