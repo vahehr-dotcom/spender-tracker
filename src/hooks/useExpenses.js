@@ -8,7 +8,6 @@ export function useExpenses(userId) {
   
   const merchantMemoryRef = useRef({})
 
-  // Load all expenses for user
   const loadExpenses = useCallback(async (uid = userId) => {
     if (!uid) return []
     
@@ -24,7 +23,6 @@ export function useExpenses(userId) {
 
       setExpenses(data || [])
 
-      // Build merchant memory for category suggestions
       data?.forEach(expense => {
         if (expense.merchant && expense.category_id) {
           merchantMemoryRef.current[expense.merchant.toLowerCase()] = expense.category_id
@@ -40,74 +38,6 @@ export function useExpenses(userId) {
     }
   }, [userId])
 
-  // Add new expense
-  const addExpense = useCallback(async (expense, uid = userId) => {
-    if (!uid) return { success: false, error: 'No user ID' }
-
-    try {
-      let receiptUrl = null
-
-      // Upload receipt if provided
-      if (expense.receipt) {
-        const fileName = `${Date.now()}_${expense.receipt.name}`
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('receipts')
-          .upload(fileName, expense.receipt)
-
-        if (uploadError) throw uploadError
-
-        const { data: urlData } = supabase.storage
-          .from('receipts')
-          .getPublicUrl(fileName)
-
-        receiptUrl = urlData.publicUrl
-      }
-
-      // Get location if available
-      let location = null
-      if (navigator.geolocation) {
-        try {
-          const position = await new Promise((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 })
-          })
-
-          const { latitude, longitude } = position.coords
-          const geoResponse = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
-          )
-          const geoData = await geoResponse.json()
-          location = geoData.display_name || `${latitude}, ${longitude}`
-        } catch (geoErr) {
-          console.warn('Geolocation failed:', geoErr)
-        }
-      }
-
-      const newExpense = {
-        user_id: uid,
-        amount: parseFloat(expense.amount),
-        merchant: expense.merchant,
-        category_id: expense.category_id,
-        spent_at: expense.spent_at || new Date().toISOString(),
-        payment_method: expense.payment_method || 'credit_card',
-        note: expense.note || null,
-        receipt_image_url: receiptUrl,
-        location: location,
-        archived: false
-      }
-
-      const { error } = await supabase.from('expenses').insert([newExpense])
-
-      if (error) throw error
-
-      await loadExpenses(uid)
-      return { success: true }
-    } catch (err) {
-      console.error('Add expense error:', err)
-      return { success: false, error: err.message }
-    }
-  }, [userId, loadExpenses])
-
-  // Update existing expense
   const updateExpense = useCallback(async (id, updates, uid = userId) => {
     try {
       const { error } = await supabase
@@ -125,7 +55,6 @@ export function useExpenses(userId) {
     }
   }, [userId, loadExpenses])
 
-  // Archive expense (soft delete)
   const archiveExpense = useCallback(async (id, uid = userId) => {
     const expense = expenses.find(e => e.id === id)
     if (!expense) return { success: false, error: 'Expense not found' }
@@ -141,7 +70,6 @@ export function useExpenses(userId) {
       setPendingUndo({ action: 'archive', expense })
       await loadExpenses(uid)
 
-      // Clear undo after 5 seconds
       setTimeout(() => {
         setPendingUndo(null)
       }, 5000)
@@ -153,7 +81,6 @@ export function useExpenses(userId) {
     }
   }, [expenses, userId, loadExpenses])
 
-  // Permanently delete expense
   const deleteExpense = useCallback(async (id, uid = userId) => {
     const expense = expenses.find(e => e.id === id)
     if (!expense) return { success: false, error: 'Expense not found' }
@@ -169,7 +96,6 @@ export function useExpenses(userId) {
       setPendingUndo({ action: 'delete', expense })
       await loadExpenses(uid)
 
-      // Clear undo after 5 seconds
       setTimeout(() => {
         setPendingUndo(null)
       }, 5000)
@@ -181,7 +107,6 @@ export function useExpenses(userId) {
     }
   }, [expenses, userId, loadExpenses])
 
-  // Undo last archive/delete
   const undoAction = useCallback(async (uid = userId) => {
     if (!pendingUndo) return { success: false, error: 'Nothing to undo' }
 
@@ -204,13 +129,11 @@ export function useExpenses(userId) {
     }
   }, [pendingUndo, userId, loadExpenses])
 
-  // Get category suggestion based on merchant
   const getCategorySuggestion = useCallback((merchant) => {
     if (!merchant) return null
     return merchantMemoryRef.current[merchant.toLowerCase()] || null
   }, [])
 
-  // Calculate AI insights for PRO users
   const calculateAIInsights = useCallback((allExpenses, categories) => {
     const now = new Date()
     const currentMonth = now.getMonth()
@@ -228,9 +151,27 @@ export function useExpenses(userId) {
 
     const merchantCounts = {}
     thisMonthExpenses.forEach(e => {
-      merchantCounts[e.merchant] = (merchantCounts[e.merchant] || 0) + 1
+      const key = `${e.merchant}|${e.amount}`
+      merchantCounts[key] = (merchantCounts[key] || 0) + 1
     })
-    const recurringMerchants = Object.entries(merchantCounts)
+    const trueDuplicates = Object.entries(merchantCounts)
+      .filter(([key, count]) => {
+        const [merchant] = key.split('|')
+        const lower = merchant.toLowerCase()
+        const isCommonRepeat = ['starbucks', 'coffee', 'gas', 'lotto', 'lottery', 'uber', 'lyft', 'parking'].some(w => lower.includes(w))
+        return count >= 3 || (count >= 2 && !isCommonRepeat)
+      })
+      .map(([key, count]) => {
+        const [merchant, amount] = key.split('|')
+        return { merchant, amount: parseFloat(amount), count }
+      })
+
+    const recurringMerchants = Object.entries(
+      thisMonthExpenses.reduce((acc, e) => {
+        acc[e.merchant] = (acc[e.merchant] || 0) + 1
+        return acc
+      }, {})
+    )
       .filter(([_, count]) => count >= 2)
       .map(([merchant]) => merchant)
 
@@ -247,7 +188,8 @@ export function useExpenses(userId) {
     return {
       forecastTotal,
       recurringMerchants,
-      topCategories
+      topCategories,
+      trueDuplicates
     }
   }, [])
 
@@ -256,7 +198,6 @@ export function useExpenses(userId) {
     pendingUndo,
     loading,
     loadExpenses,
-    addExpense,
     updateExpense,
     archiveExpense,
     deleteExpense,

@@ -58,6 +58,12 @@ export default function ExpenseList({
     setEditForm({})
   }
 
+  const handleDelete = (id, merchant) => {
+    if (window.confirm(`Permanently delete $${expenses.find(e => e.id === id)?.amount} at ${merchant}? This cannot be undone.`)) {
+      onDelete(id)
+    }
+  }
+
   const getLocationLabel = (location) => {
     if (!location) return null
     try {
@@ -112,11 +118,16 @@ export default function ExpenseList({
                       <button onClick={() => onOpenReceipt(e.receipt_image_url)} style={btnStyle}>📎 Receipt</button>
                     )}
 
-                    {!e.archived ? (
+                    {!e.archived && (
                       <button onClick={() => onArchive(e.id)} style={btnStyle}>📦 Archive</button>
-                    ) : (
-                      <button onClick={() => onDelete(e.id)} style={{ ...btnStyle, backgroundColor: '#FF5252', color: 'white' }}>🗑️ Delete</button>
                     )}
+
+                    <button
+                      onClick={() => handleDelete(e.id, e.merchant)}
+                      style={{ ...btnStyle, backgroundColor: '#FF5252', color: 'white' }}
+                    >
+                      🗑️ Delete
+                    </button>
                   </div>
                 </div>
 
