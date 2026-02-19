@@ -72,7 +72,6 @@ const CATEGORY_KEYWORDS = {
 
 const KNOWN_MERCHANTS = []
 
-// Build flat list of all known merchant keywords for smart extraction
 ;(function buildMerchantList() {
   for (const keywords of Object.values(CATEGORY_KEYWORDS)) {
     for (const kw of keywords) {
@@ -128,12 +127,18 @@ class ExpenseService {
     return null
   }
 
-  static resolveCategoryId(merchant, fullMessage, allCategories) {
-    const hint = ExpenseService.matchCategoryByKeyword(merchant) || ExpenseService.matchCategoryByKeyword(fullMessage)
+  static resolveCategoryId(merchant, description, fullMessage, allCategories) {
+    // Description keywords take priority over merchant keywords
+    const descHint = description ? ExpenseService.matchCategoryByKeyword(description) : null
+    const merchantHint = ExpenseService.matchCategoryByKeyword(merchant)
+    const messageHint = ExpenseService.matchCategoryByKeyword(fullMessage)
+
+    const hint = descHint || merchantHint || messageHint
+
     if (hint) {
       const id = ExpenseService.findCategoryId(hint, allCategories)
       if (id) {
-        console.log('🏷️ Category matched:', hint, '→', id)
+        console.log('🏷️ Category matched:', hint, '→', id, descHint ? '(from description)' : merchantHint ? '(from merchant)' : '(from message)')
         return { id, name: hint }
       }
     }
@@ -145,7 +150,7 @@ class ExpenseService {
 
   static cleanMerchant(text) {
     return text
-      .replace(/\b(a|an|the|some|from|at|to|for|in)\b/gi, '')
+      .replace(/\b(i|a|an|the|some|from|at|to|for|in|on|my|and|or)\b/gi, '')
       .replace(/\s+/g, ' ')
       .trim()
   }
@@ -154,7 +159,6 @@ class ExpenseService {
     const lower = text.toLowerCase()
     for (const merchant of KNOWN_MERCHANTS) {
       if (lower.includes(merchant)) {
-        // Find original casing from text
         const idx = lower.indexOf(merchant)
         return {
           name: text.substring(idx, idx + merchant.length).trim(),
@@ -175,9 +179,9 @@ class ExpenseService {
     if (!amountMatch) return null
     const amount = parseFloat(amountMatch[1])
 
-    // Strip the command word, amount, and date hints to get the content
+    // Strip command words, amount, date hints, and pronouns
     let content = userMessage
-      .replace(/\b(?:add|spent)\b/gi, '')
+      .replace(/\b(?:i|add|spent|bought|got|paid)\b/gi, '')
       .replace(/\$?\d+(?:\.\d{2})?/g, '')
       .replace(/\b(?:today|yesterday|\d+\s+days?\s+ago)\b/gi, '')
       .replace(/\s+/g, ' ')
@@ -277,7 +281,7 @@ class ExpenseService {
     if (!parsed) return { success: false, error: 'Could not parse expense from message' }
 
     const { id: categoryId, name: categoryName } = ExpenseService.resolveCategoryId(
-      parsed.merchant, userMessage, categories
+      parsed.merchant, parsed.description, userMessage, categories
     )
 
     if (!categoryId) return { success: false, error: 'No categories available' }

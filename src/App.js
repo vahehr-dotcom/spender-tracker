@@ -368,20 +368,36 @@ function MainApp() {
 
         <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-            <input
+          <input
               type="text"
               placeholder="Search expenses..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
+              onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
               style={{
                 padding: '10px',
                 border: '2px solid #e5e7eb',
                 borderRadius: '8px',
                 flex: 1,
-                marginRight: '10px'
+                marginRight: '0'
               }}
             />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                style={{
+                  padding: '8px 16px',
+                  border: '1px solid #ddd',
+                  borderRadius: '8px',
+                  background: 'white',
+                  cursor: 'pointer',
+                  marginLeft: '8px',
+                  fontSize: '13px'
+                }}
+              >
+                ✕ Clear
+              </button>
+            )}
             <button
               onClick={handleExport}
               style={{
