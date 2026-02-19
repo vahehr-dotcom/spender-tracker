@@ -116,6 +116,7 @@ function MainApp() {
     const search = searchTerm.toLowerCase()
     return (
       expense.merchant?.toLowerCase().includes(search) ||
+      (expense.description || '').toLowerCase().includes(search) ||
       (categories.find(c => c.id === expense.category_id)?.name || '').toLowerCase().includes(search) ||
       (expense.note || '').toLowerCase().includes(search)
     )
@@ -161,6 +162,7 @@ function MainApp() {
       spentAt: expense.spent_at,
       paymentMethod: expense.payment_method,
       note: expense.note,
+      description: expense.description,
       receiptUrl: expense.receipt_image_url
     })
 
@@ -207,10 +209,11 @@ function MainApp() {
   }
 
   const handleExport = () => {
-    const headers = ['Date', 'Merchant', 'Category', 'Amount', 'Payment Method', 'Notes']
+    const headers = ['Date', 'Merchant', 'Description', 'Category', 'Amount', 'Payment Method', 'Notes']
     const rows = filteredExpenses.map(e => [
       new Date(e.spent_at).toLocaleDateString(),
       e.merchant,
+      e.description || '',
       categories.find(c => c.id === e.category_id)?.name || '',
       e.amount,
       e.payment_method,
@@ -407,10 +410,10 @@ function MainApp() {
             categories={categories}
             mainCategories={mainCategories}
             isProMode={isProMode}
+            userId={session.user.id}
             onUpdate={(id, updates) => updateExpense(id, updates, session.user.id)}
             onArchive={(id) => archiveExpense(id, session.user.id)}
             onDelete={(id) => deleteExpense(id, session.user.id)}
-            onOpenReceipt={(url) => window.open(url, '_blank')}
           />
 
           {pendingUndo && (

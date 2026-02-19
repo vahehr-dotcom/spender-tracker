@@ -47,11 +47,12 @@ const CATEGORY_KEYWORDS = {
   'Student Loans': ['student loan', 'student debt', 'navient', 'sallie mae', 'nelnet', 'mohela'],
   'Personal Loans': ['personal loan', 'sofi loan', 'lending club', 'prosper loan'],
   'Medical Debt': ['medical bill', 'hospital bill', 'medical debt', 'medical payment'],
-  'Clothing & Shoes': ['clothing', 'clothes', 'shoes', 'nike', 'adidas', 'zara', 'h&m', 'nordstrom', 'ross', 'tjmaxx', 'marshalls', 'foot locker'],
+  'Clothing & Shoes': ['clothing', 'clothes', 'shoes', 'nike', 'adidas', 'zara', 'h&m', 'ross', 'tjmaxx', 'marshalls', 'foot locker'],
+  'Accessories': ['watch', 'jewelry', 'sunglasses', 'belt', 'handbag', 'purse', 'wallet', 'bracelet', 'necklace', 'earring', 'ring', 'cologne', 'perfume'],
   'Electronics': ['electronics', 'best buy', 'apple store', 'computer', 'laptop', 'phone case'],
   'Personal Care & Beauty': ['salon', 'haircut', 'barber', 'nails', 'spa', 'sephora', 'ulta', 'beauty'],
   'Home Goods': ['home goods', 'homegoods', 'bed bath', 'target home', 'home depot', 'lowes', 'ace hardware'],
-  'General Retail': ['target', 'walmart', 'dollar tree', 'dollar general', 'five below', 'big lots'],
+  'General Retail': ['nordstrom', 'nordstrom rack', 'target', 'walmart', 'dollar tree', 'dollar general', 'five below', 'big lots', 'macy'],
   'Childcare': ['daycare', 'childcare', 'babysitter', 'nanny'],
   'School & Tuition': ['tuition', 'school', 'university', 'college', 'education'],
   'Activities': ['soccer', 'baseball', 'dance class', 'piano', 'karate', 'swim class', 'camp', 'kids activity'],
@@ -128,6 +129,13 @@ class ExpenseService {
     return { id: fallbackId, name: 'Miscellaneous' }
   }
 
+  static cleanMerchant(text) {
+    return text
+      .replace(/\b(a|an|the|some|from|at|to|for|in)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
   static parseCommand(userMessage) {
     const lower = userMessage.toLowerCase()
 
@@ -165,6 +173,8 @@ class ExpenseService {
 
     if (!merchant) return null
 
+    merchant = ExpenseService.cleanMerchant(merchant)
+
     let dateHint = 'today'
     if (lower.includes('yesterday')) dateHint = 'yesterday'
     else if (lower.match(/\d+\s+days?\s+ago/)) dateHint = lower.match(/\d+\s+days?\s+ago/)[0]
@@ -180,7 +190,7 @@ class ExpenseService {
     return ExpenseService.getLocalISOString(now)
   }
 
-  static async add({ userId, amount, merchant, categoryId, spentAt, paymentMethod = 'card', note = null, receiptUrl = null }) {
+  static async add({ userId, amount, merchant, categoryId, spentAt, paymentMethod = 'card', note = null, description = null, receiptUrl = null }) {
     if (!userId || !amount || !merchant || !categoryId) {
       return { success: false, error: 'Missing required fields: userId, amount, merchant, categoryId' }
     }
@@ -193,6 +203,7 @@ class ExpenseService {
       spent_at: spentAt || ExpenseService.getLocalISOString(),
       payment_method: paymentMethod,
       note,
+      description,
       receipt_image_url: receiptUrl || null,
       archived: false
     }
@@ -244,7 +255,7 @@ class ExpenseService {
     }
   }
 
-  static async addFromForm({ userId, amount, merchant, categoryId, spentAt, paymentMethod, note, receiptUrl }) {
+  static async addFromForm({ userId, amount, merchant, categoryId, spentAt, paymentMethod, note, description, receiptUrl }) {
     return await ExpenseService.add({
       userId,
       amount,
@@ -253,6 +264,7 @@ class ExpenseService {
       spentAt: spentAt || ExpenseService.getLocalISOString(),
       paymentMethod,
       note,
+      description,
       receiptUrl
     })
   }

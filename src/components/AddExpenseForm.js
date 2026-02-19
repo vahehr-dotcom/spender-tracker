@@ -16,6 +16,7 @@ function getNowLocalDateTime() {
 export default function AddExpenseForm({ categories, mainCategories = [], onAddExpense, isProMode, onUpgradeToPro, userId }) {
   const [amount, setAmount] = useState('')
   const [merchant, setMerchant] = useState('')
+  const [description, setDescription] = useState('')
   const [spentAtLocal, setSpentAtLocal] = useState(getNowLocalDateTime())
   const [paymentMethod, setPaymentMethod] = useState('card')
   const [categoryId, setCategoryId] = useState('')
@@ -82,6 +83,7 @@ export default function AddExpenseForm({ categories, mainCategories = [], onAddE
     const result = await onAddExpense({
       amount: parseFloat(amount),
       merchant,
+      description: description || null,
       category_id: categoryId,
       spent_at: spentAt,
       payment_method: paymentMethod,
@@ -93,6 +95,7 @@ export default function AddExpenseForm({ categories, mainCategories = [], onAddE
       setSaveSuccess(true)
       setAmount('')
       setMerchant('')
+      setDescription('')
       setSpentAtLocal(getNowLocalDateTime())
       setCategoryId('')
       setNotes('')
@@ -170,6 +173,26 @@ export default function AddExpenseForm({ categories, mainCategories = [], onAddE
           value={merchant}
           onChange={(e) => setMerchant(e.target.value)}
           placeholder="e.g., Starbucks"
+          style={{
+            width: '100%',
+            padding: '10px',
+            fontSize: '16px',
+            border: '1px solid #ddd',
+            borderRadius: '8px',
+            boxSizing: 'border-box'
+          }}
+        />
+      </div>
+
+      <div style={{ marginBottom: '15px' }}>
+        <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
+          Item / Description <span style={{ fontSize: '14px', color: '#666' }}>(optional)</span>
+        </label>
+        <input
+          type="text"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="e.g., Men's cologne, Large iced latte"
           style={{
             width: '100%',
             padding: '10px',
@@ -401,19 +424,23 @@ export default function AddExpenseForm({ categories, mainCategories = [], onAddE
               onClick={removeReceipt}
               style={{
                 position: 'absolute',
-                top: '-8px',
-                right: '-8px',
-                width: '24px',
-                height: '24px',
+                top: '-10px',
+                right: '-10px',
+                width: '28px',
+                height: '28px',
                 borderRadius: '50%',
-                border: 'none',
+                border: '2px solid white',
                 background: '#ef4444',
                 color: 'white',
                 cursor: 'pointer',
-                fontSize: '14px',
+                fontSize: '16px',
+                fontWeight: 'bold',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center'
+                justifyContent: 'center',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                lineHeight: 1,
+                padding: 0
               }}
             >
               ×
