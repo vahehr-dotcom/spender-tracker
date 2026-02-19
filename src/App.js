@@ -70,6 +70,7 @@ function MainApp() {
   const [showUpgrade, setShowUpgrade] = useState(false)
   const [showAdmin, setShowAdmin] = useState(false)
   const [parsedTransactions, setParsedTransactions] = useState([])
+  const [searchInput, setSearchInput] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [showArchived, setShowArchived] = useState(false)
   const [testMode, setTestMode] = useState(false)
@@ -125,6 +126,15 @@ function MainApp() {
   const isProMode = !testMode && subscriptionStatus === 'pro'
   const aiInsights = isProMode ? calculateAIInsights(allExpenses, categories) : null
 
+  const handleSearch = () => {
+    setSearchTerm(searchInput)
+  }
+
+  const handleClearSearch = () => {
+    setSearchInput('')
+    setSearchTerm('')
+  }
+
   const handleAICommand = async (command) => {
     const { action, data } = command
     console.log('🎯 handleAICommand called:', action, data)
@@ -135,6 +145,7 @@ function MainApp() {
     }
 
     if (action === 'search') {
+      setSearchInput(data.term)
       setSearchTerm(data.term)
       return { success: true, message: `Searching for: ${data.term}` }
     }
@@ -367,32 +378,45 @@ function MainApp() {
         </div>
 
         <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-          <input
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px', gap: '8px' }}>
+            <input
               type="text"
               placeholder="Search expenses..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               style={{
                 padding: '10px',
                 border: '2px solid #e5e7eb',
                 borderRadius: '8px',
-                flex: 1,
-                marginRight: '0'
+                flex: 1
               }}
             />
+            <button
+              onClick={handleSearch}
+              style={{
+                padding: '10px 16px',
+                border: 'none',
+                borderRadius: '8px',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: 'white',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: '14px'
+              }}
+            >
+              🔍 Search
+            </button>
             {searchTerm && (
               <button
-                onClick={() => setSearchTerm('')}
+                onClick={handleClearSearch}
                 style={{
-                  padding: '8px 16px',
+                  padding: '10px 16px',
                   border: '1px solid #ddd',
                   borderRadius: '8px',
                   background: 'white',
                   cursor: 'pointer',
-                  marginLeft: '8px',
-                  fontSize: '13px'
+                  fontSize: '14px'
                 }}
               >
                 ✕ Clear
@@ -401,18 +425,17 @@ function MainApp() {
             <button
               onClick={handleExport}
               style={{
-                padding: '8px 16px',
+                padding: '10px 16px',
                 border: '1px solid #ddd',
                 borderRadius: '8px',
                 background: 'white',
                 cursor: 'pointer',
-                marginRight: '10px',
                 fontSize: '13px'
               }}
             >
               📥 Export CSV
             </button>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '14px', whiteSpace: 'nowrap' }}>
               <input
                 type="checkbox"
                 checked={showArchived}

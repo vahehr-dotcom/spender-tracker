@@ -51,7 +51,7 @@ const CATEGORY_KEYWORDS = {
   'Accessories': ['watch', 'jewelry', 'sunglasses', 'belt', 'handbag', 'purse', 'wallet', 'bracelet', 'necklace', 'earring', 'ring', 'cologne', 'perfume'],
   'Electronics': ['electronics', 'best buy', 'apple store', 'computer', 'laptop', 'phone case'],
   'Personal Care & Beauty': ['salon', 'haircut', 'barber', 'nails', 'spa', 'sephora', 'ulta', 'beauty'],
-  'Home Goods': ['home goods', 'homegoods', 'bed bath', 'target home', 'home depot', 'lowes', 'ace hardware'],
+  'Home Goods': ['home goods', 'homegoods', 'bed bath', 'target home', 'home depot', 'lowes', 'ace hardware', 'roof', 'roofing', 'plumber', 'plumbing', 'hvac', 'contractor', 'handyman', 'home repair', 'house repair'],
   'General Retail': ['nordstrom', 'nordstrom rack', 'target', 'walmart', 'dollar tree', 'dollar general', 'five below', 'big lots', 'macy'],
   'Childcare': ['daycare', 'childcare', 'babysitter', 'nanny'],
   'School & Tuition': ['tuition', 'school', 'university', 'college', 'education'],
@@ -99,6 +99,12 @@ class ExpenseService {
     return `${year}-${month}-${day}T${hour}:${min}:${sec}${sign}${hours}:${minutes}`
   }
 
+  static matchWordBoundary(text, keyword) {
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex = new RegExp(`\\b${escaped}\\b`, 'i')
+    return regex.test(text)
+  }
+
   static matchCategoryByKeyword(text) {
     const lower = text.toLowerCase()
     let bestMatch = null
@@ -106,7 +112,7 @@ class ExpenseService {
 
     for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
       for (const keyword of keywords) {
-        if (lower.includes(keyword) && keyword.length > bestLength) {
+        if (ExpenseService.matchWordBoundary(lower, keyword) && keyword.length > bestLength) {
           bestMatch = category
           bestLength = keyword.length
         }
@@ -128,7 +134,6 @@ class ExpenseService {
   }
 
   static resolveCategoryId(merchant, description, fullMessage, allCategories) {
-    // Description keywords take priority over merchant keywords
     const descHint = description ? ExpenseService.matchCategoryByKeyword(description) : null
     const merchantHint = ExpenseService.matchCategoryByKeyword(merchant)
     const messageHint = ExpenseService.matchCategoryByKeyword(fullMessage)
@@ -150,7 +155,7 @@ class ExpenseService {
 
   static cleanMerchant(text) {
     return text
-      .replace(/\b(i|a|an|the|some|from|at|to|for|in|on|my|and|or)\b/gi, '')
+      .replace(/\b(i|a|an|the|some|from|at|to|for|in|on|my|and|or|just|it)\b/gi, '')
       .replace(/\s+/g, ' ')
       .trim()
   }
@@ -158,11 +163,15 @@ class ExpenseService {
   static findKnownMerchant(text) {
     const lower = text.toLowerCase()
     for (const merchant of KNOWN_MERCHANTS) {
-      if (lower.includes(merchant)) {
-        const idx = lower.indexOf(merchant)
-        return {
-          name: text.substring(idx, idx + merchant.length).trim(),
-          keyword: merchant
+      if (ExpenseService.matchWordBoundary(lower, merchant)) {
+        const escaped = merchant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        const match = lower.match(new RegExp(`\\b${escaped}\\b`, 'i'))
+        if (match) {
+          const idx = match.index
+          return {
+            name: text.substring(idx, idx + merchant.length).trim(),
+            keyword: merchant
+          }
         }
       }
     }
@@ -172,7 +181,7 @@ class ExpenseService {
   static parseCommand(userMessage) {
     const lower = userMessage.toLowerCase()
 
-    const isAdd = (lower.includes('add') || lower.includes('spent')) && /\$?\d+/.test(lower)
+    const isAdd = (lower.includes('add') || lower.includes('spent') || lower.includes('bought') || lower.includes('paid')) && /\$?\d+/.test(lower)
     if (!isAdd) return null
 
     const amountMatch = lower.match(/\$?(\d+(?:\.\d{2})?)/)
@@ -181,11 +190,14 @@ class ExpenseService {
 
     // Strip command words, amount, date hints, and pronouns
     let content = userMessage
-      .replace(/\b(?:i|add|spent|bought|got|paid)\b/gi, '')
+      .replace(/\b(?:i|add|spent|bought|got|paid|just)\b/gi, '')
       .replace(/\$?\d+(?:\.\d{2})?/g, '')
       .replace(/\b(?:today|yesterday|\d+\s+days?\s+ago)\b/gi, '')
       .replace(/\s+/g, ' ')
       .trim()
+
+    // Try "at/from [store]" pattern first
+    const atMatch = userMessage.match(/\b(?:at|from)\s+([a-z0-9\s&'.-]+?)(?:\s+(?:today|yesterday|on|last|\$)|\s*$)/i)
 
     // Try to find a known merchant/store in the message
     const knownMerchant = ExpenseService.findKnownMerchant(userMessage)
@@ -193,27 +205,42 @@ class ExpenseService {
     let merchant = null
     let description = null
 
-    if (knownMerchant) {
-      merchant = knownMerchant.name
-      // Everything else in content (minus the merchant) is the description
-      const descParts = content.toLowerCase().replace(knownMerchant.keyword, '').trim()
+    if (atMatch) {
+      // Explicit "at/from Store" takes highest priority
+      merchant = atMatch[1].trim()
+      const merchantRegex = new RegExp('\\b(?:at|from)\\s+' + merchant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+      const descParts = content.replace(merchantRegex, '').trim()
       const cleaned = ExpenseService.cleanMerchant(descParts)
-      if (cleaned.length > 0) {
+      if (cleaned.length > 1) {
+        description = cleaned
+      }
+    } else if (knownMerchant) {
+      merchant = knownMerchant.name
+      const descParts = content.replace(new RegExp(`\\b${knownMerchant.keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'), '').trim()
+      const cleaned = ExpenseService.cleanMerchant(descParts)
+      if (cleaned.length > 1) {
         description = cleaned
       }
     } else {
-      // No known merchant — try "at/from [store]" pattern
-      const atMatch = userMessage.match(/\b(?:at|from)\s+([a-z0-9\s&'.-]+?)(?:\s+(?:today|yesterday|on|last|\$)|\s*$)/i)
-      if (atMatch) {
-        merchant = atMatch[1].trim()
-        const descParts = content.replace(new RegExp('\\b(?:at|from)\\s+' + merchant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), '').trim()
-        const cleaned = ExpenseService.cleanMerchant(descParts)
-        if (cleaned.length > 0) {
+      // No known merchant, no "at" pattern — use cleaned content as description
+      // and try to extract a sensible merchant from context
+      const cleaned = ExpenseService.cleanMerchant(content)
+      if (cleaned.length > 0) {
+        // If it looks like a service description, use key noun as merchant
+        const serviceWords = cleaned.match(/\b(repair|repairing|fixing|replacing|installing|painting|cleaning)\b/i)
+        if (serviceWords) {
+          // Extract the object being serviced as the merchant
+          const afterService = cleaned.replace(serviceWords[0], '').trim()
+          const objectWord = ExpenseService.cleanMerchant(afterService)
+          if (objectWord.length > 1) {
+            merchant = objectWord.replace(/\b\w/g, c => c.toUpperCase()) + ' ' + serviceWords[1].charAt(0).toUpperCase() + serviceWords[1].slice(1).toLowerCase()
+          } else {
+            merchant = serviceWords[1].charAt(0).toUpperCase() + serviceWords[1].slice(1).toLowerCase() + ' Service'
+          }
           description = cleaned
+        } else {
+          merchant = cleaned
         }
-      } else {
-        // Fallback — use cleaned content as merchant
-        merchant = ExpenseService.cleanMerchant(content)
       }
     }
 
