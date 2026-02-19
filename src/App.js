@@ -1,381 +1,490 @@
-import React, { useState } from 'react'
-import { supabase } from '../supabaseClient'
-import ExpenseService from '../services/ExpenseService'
+import React, { useState, useEffect } from 'react'
+import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom'
 
-function getNowLocalDateTime() {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  const hours = String(now.getHours()).padStart(2, '0')
-  const minutes = String(now.getMinutes()).padStart(2, '0')
-  return `${year}-${month}-${day}T${hours}:${minutes}`
+import Login from './components/Login'
+import Onboarding from './components/Onboarding'
+import Header from './components/Header'
+import ChatAssistant from './components/ChatAssistant'
+import AddExpenseForm from './components/AddExpenseForm'
+import ExpenseList from './components/ExpenseList'
+import MonthlySummary from './components/MonthlySummary'
+import FileImport from './components/FileImport'
+import ImportPreview from './components/ImportPreview'
+import UpgradeModal from './components/UpgradeModal'
+import AdminPanel from './components/AdminPanel'
+import AnalyticsDashboard from './components/AnalyticsDashboard'
+import LoginHistoryPage from './pages/LoginHistoryPage'
+
+import { useAuth, useUserData, useExpenses } from './hooks'
+import ExpenseService from './lib/ExpenseService'
+
+const AnalyticsPage = () => {
+  const navigate = useNavigate()
+  return (
+    <div style={{ padding: '20px' }}>
+      <button onClick={() => navigate('/')} style={{ marginBottom: '20px', padding: '10px 20px', cursor: 'pointer' }}>
+        ← Back to Dashboard
+      </button>
+      <AnalyticsDashboard />
+    </div>
+  )
 }
 
-export default function AddExpenseForm({ categories, mainCategories = [], onAddExpense, isProMode, onUpgradeToPro, userId }) {
-  const [amount, setAmount] = useState('')
-  const [merchant, setMerchant] = useState('')
-  const [spentAtLocal, setSpentAtLocal] = useState(getNowLocalDateTime())
-  const [paymentMethod, setPaymentMethod] = useState('card')
-  const [categoryId, setCategoryId] = useState('')
-  const [notes, setNotes] = useState('')
-  const [isSaving, setIsSaving] = useState(false)
-  const [saveSuccess, setSaveSuccess] = useState(false)
-  const [showAddCategory, setShowAddCategory] = useState(false)
-  const [newCategoryName, setNewCategoryName] = useState('')
-  const [newCategoryParent, setNewCategoryParent] = useState('')
+function MainApp() {
+  const {
+    session,
+    loading: authLoading,
+    loginStatus,
+    handleLogin,
+    handleLogout,
+    startSession,
+    logLogin,
+    logPageView
+  } = useAuth()
 
-  const handleSave = async () => {
-    if (!amount || !merchant || !categoryId) {
-      alert('Please fill in Amount, Merchant, and Category')
-      return
+  const {
+    userProfile,
+    subscriptionStatus,
+    categories,
+    mainCategories,
+    loadAllUserData,
+    checkOnboardingStatus,
+    saveUserProfile,
+    isAdmin,
+    isTester
+  } = useUserData()
+
+  const {
+    expenses,
+    pendingUndo,
+    loadExpenses,
+    updateExpense,
+    archiveExpense,
+    deleteExpense,
+    undoAction,
+    calculateAIInsights
+  } = useExpenses(session?.user?.id)
+
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [showUpgrade, setShowUpgrade] = useState(false)
+  const [showAdmin, setShowAdmin] = useState(false)
+  const [parsedTransactions, setParsedTransactions] = useState([])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
+  const [testMode, setTestMode] = useState(false)
+
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (session?.user) {
+      const initializeUser = async () => {
+        const { needsOnboarding } = await checkOnboardingStatus(session.user.id)
+        
+        if (needsOnboarding) {
+          setShowOnboarding(true)
+        } else {
+          setShowOnboarding(false)
+          await loadAllUserData(session.user.id, session.user.email)
+          await loadExpenses(session.user.id)
+        }
+
+        startSession(session.user.id, session.user.email)
+        logLogin(session.user.email)
+        logPageView(session.user.id)
+      }
+
+      initializeUser()
+    }
+  }, [session])
+
+  const handleOnboardingComplete = async (profileData) => {
+    const result = await saveUserProfile(session.user.id, profileData)
+    
+    if (result.success) {
+      setShowOnboarding(false)
+      await loadAllUserData(session.user.id, session.user.email)
+      await loadExpenses(session.user.id)
+    }
+    
+    return result
+  }
+
+  const allExpenses = showArchived ? expenses : expenses.filter(e => !e.archived)
+  const filteredExpenses = allExpenses.filter(expense => {
+    if (!searchTerm) return true
+    const search = searchTerm.toLowerCase()
+    return (
+      expense.merchant?.toLowerCase().includes(search) ||
+      (categories.find(c => c.id === expense.category_id)?.name || '').toLowerCase().includes(search) ||
+      (expense.note || '').toLowerCase().includes(search)
+    )
+  })
+
+  const isProMode = !testMode && subscriptionStatus === 'pro'
+  const aiInsights = isProMode ? calculateAIInsights(allExpenses, categories) : null
+
+  const handleAICommand = async (command) => {
+    const { action, data } = command
+    console.log('🎯 handleAICommand called:', action, data)
+
+    if (action === 'update_expense') {
+      const result = await updateExpense(data.id, data.updates, session.user.id)
+      return result.success ? { success: true, message: 'Expense updated!' } : { success: false, message: result.error }
     }
 
-    setIsSaving(true)
-    setSaveSuccess(false)
+    if (action === 'search') {
+      setSearchTerm(data.term)
+      return { success: true, message: `Searching for: ${data.term}` }
+    }
 
-    const spentAt = ExpenseService.getLocalISOString(new Date(spentAtLocal))
+    if (action === 'export') {
+      handleExport()
+      return { success: true, message: 'Expenses exported!' }
+    }
 
-    const result = await onAddExpense({
-      amount: parseFloat(amount),
-      merchant,
-      category_id: categoryId,
-      spent_at: spentAt,
-      payment_method: paymentMethod,
-      note: notes || null
+    return { success: false, message: 'Unknown command' }
+  }
+
+  const handleReloadExpenses = async () => {
+    if (session?.user?.id) {
+      await loadExpenses(session.user.id)
+    }
+  }
+
+  const handleAddExpense = async (expense) => {
+    const result = await ExpenseService.addFromForm({
+      userId: session.user.id,
+      amount: expense.amount,
+      merchant: expense.merchant,
+      categoryId: expense.category_id,
+      spentAt: expense.spent_at,
+      paymentMethod: expense.payment_method,
+      note: expense.note
     })
 
     if (result.success) {
-      setSaveSuccess(true)
-      setAmount('')
-      setMerchant('')
-      setSpentAtLocal(getNowLocalDateTime())
-      setCategoryId('')
-      setNotes('')
-      setTimeout(() => setSaveSuccess(false), 2000)
-    } else {
-      alert('Failed to save: ' + (result.error || 'Unknown error'))
+      await loadExpenses(session.user.id)
     }
 
-    setIsSaving(false)
+    return result
   }
 
-  const handleAddCategory = async () => {
-    if (!newCategoryName.trim()) return
+  const handleImport = async (file) => {
+    const text = await file.text()
+    const lines = text.split('\n').filter(line => line.trim())
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
 
-    try {
-      const { data, error } = await supabase
-        .from('categories')
-        .insert({
-          user_id: userId,
-          name: newCategoryName.trim(),
-          is_custom: true,
-          parent_id: newCategoryParent || null
-        })
-        .select()
-        .single()
+    const transactions = lines.slice(1).map(line => {
+      const values = line.split(',').map(v => v.trim())
+      const obj = {}
+      headers.forEach((h, i) => {
+        obj[h] = values[i] || ''
+      })
+      return obj
+    })
 
-      if (error) throw error
+    setParsedTransactions(transactions)
+    setShowImport(true)
+  }
 
-      setNewCategoryName('')
-      setNewCategoryParent('')
-      setShowAddCategory(false)
-      setCategoryId(data.id)
-      window.location.reload()
-    } catch (err) {
-      alert('Failed to add category: ' + err.message)
+  const handleImportConfirm = async (mappedExpenses) => {
+    for (const exp of mappedExpenses) {
+      await ExpenseService.addFromForm({
+        userId: session.user.id,
+        amount: exp.amount,
+        merchant: exp.merchant,
+        categoryId: exp.category_id,
+        spentAt: exp.spent_at,
+        paymentMethod: exp.payment_method,
+        note: exp.note
+      })
     }
+    setShowImport(false)
+    setParsedTransactions([])
+    await loadExpenses(session.user.id)
   }
 
-  const customCategoryCount = categories.filter(c => c.is_custom && c.user_id === userId).length
-  const canAddCategory = isProMode || customCategoryCount < 3
+  const handleExport = () => {
+    const headers = ['Date', 'Merchant', 'Category', 'Amount', 'Payment Method', 'Notes']
+    const rows = filteredExpenses.map(e => [
+      new Date(e.spent_at).toLocaleDateString(),
+      e.merchant,
+      categories.find(c => c.id === e.category_id)?.name || '',
+      e.amount,
+      e.payment_method,
+      e.note || ''
+    ])
 
-  const hasGroupedCategories = mainCategories && mainCategories.length > 0
+    const csv = [headers, ...rows].map(row => row.join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `expenses_${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+  }
+
+  if (authLoading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <p>Loading...</p>
+      </div>
+    )
+  }
+
+  if (!session) {
+    return (
+      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
+        <Login onLogin={handleLogin} status={loginStatus} />
+      </div>
+    )
+  }
+
+  if (showOnboarding) {
+    return (
+      <Onboarding
+        user={session.user}
+        onComplete={handleOnboardingComplete}
+        onLogout={handleLogout}
+      />
+    )
+  }
 
   return (
-    <div>
-      <h3 style={{ marginTop: 0, marginBottom: '20px' }}>Add Expense</h3>
-
-      <div style={{ marginBottom: '15px' }}>
-        <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
-          Amount <span style={{ color: 'red' }}>*</span>
-        </label>
-        <input
-          type="number"
-          step="0.01"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="42.50"
-          style={{
-            width: '100%',
-            padding: '10px',
-            fontSize: '16px',
-            border: '1px solid #ddd',
-            borderRadius: '8px',
-            boxSizing: 'border-box'
-          }}
-        />
-      </div>
-
-      <div style={{ marginBottom: '15px' }}>
-        <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
-          Merchant <span style={{ color: 'red' }}>*</span>
-        </label>
-        <input
-          type="text"
-          value={merchant}
-          onChange={(e) => setMerchant(e.target.value)}
-          placeholder="e.g., Starbucks"
-          style={{
-            width: '100%',
-            padding: '10px',
-            fontSize: '16px',
-            border: '1px solid #ddd',
-            borderRadius: '8px',
-            boxSizing: 'border-box'
-          }}
-        />
-      </div>
-
-      <div style={{ marginBottom: '15px' }}>
-        <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
-          Date & Time <span style={{ color: 'red' }}>*</span>
-        </label>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <input
-            type="datetime-local"
-            value={spentAtLocal}
-            onChange={(e) => setSpentAtLocal(e.target.value)}
-            style={{
-              flex: 1,
-              padding: '10px',
-              fontSize: '16px',
-              border: '1px solid #ddd',
-              borderRadius: '8px'
-            }}
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', padding: '20px' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+        <div style={{
+          background: 'white',
+          borderRadius: '16px',
+          padding: '30px',
+          boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
+          marginBottom: '20px'
+        }}>
+         <Header
+            userProfile={userProfile}
+            userEmail={session.user.email}
+            isAdmin={isAdmin()}
+            isTester={isTester()}
+            isProMode={isProMode}
+            testMode={testMode}
+            onTestModeToggle={() => setTestMode(!testMode)}
+            onImport={() => setShowImport(true)}
+            onExport={handleExport}
+            onLogout={handleLogout}
+            onUpgrade={() => setShowUpgrade(true)}
+            onOpenAdmin={() => setShowAdmin(true)}
           />
-          <button
-            onClick={() => setSpentAtLocal(getNowLocalDateTime())}
-            style={{
-              padding: '10px 15px',
-              border: '1px solid #667eea',
-              borderRadius: '8px',
-              background: 'white',
-              color: '#667eea',
-              cursor: 'pointer'
-            }}
-          >
-            Now
-          </button>
-        </div>
-      </div>
 
-      <div style={{ marginBottom: '15px' }}>
-        <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
-          Category <span style={{ color: 'red' }}>*</span>
-        </label>
-        <select
-          value={categoryId}
-          onChange={(e) => setCategoryId(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '10px',
-            fontSize: '16px',
-            border: '1px solid #ddd',
-            borderRadius: '8px',
-            boxSizing: 'border-box'
-          }}
-        >
-          <option value="">-- Select Category --</option>
-          {hasGroupedCategories ? (
-            mainCategories.map((main) => (
-              <optgroup key={main.id} label={main.name}>
-                <option value={main.id}>{main.name} (General)</option>
-                {main.subcategories && main.subcategories.map((sub) => (
-                  <option key={sub.id} value={sub.id}>{sub.name}</option>
-                ))}
-              </optgroup>
-            ))
-          ) : (
-            categories.filter(c => c.parent_id === null).map((cat) => (
-              <option key={cat.id} value={cat.id}>{cat.name}</option>
-            ))
-          )}
-        </select>
-
-        <div style={{ marginTop: '10px' }}>
-          {canAddCategory ? (
-            <button
-              onClick={() => setShowAddCategory(true)}
-              style={{
-                padding: '8px 12px',
-                border: '1px solid #667eea',
-                borderRadius: '8px',
-                background: 'white',
-                color: '#667eea',
-                cursor: 'pointer',
-                fontSize: '14px'
-              }}
-            >
-              + Add Custom Category
-            </button>
-          ) : (
-            <div style={{ fontSize: '14px', color: '#666' }}>
-              <span style={{ color: '#ef4444' }}>3 custom categories limit reached</span>
+          {!isProMode && (
+            <div style={{
+              background: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)',
+              padding: '15px',
+              borderRadius: '12px',
+              marginBottom: '20px',
+              color: 'white',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <span style={{ fontWeight: 'bold' }}>⚡ Unlock PRO features: AI Insights, Voice Commands, Predictions & More!</span>
               <button
-                onClick={onUpgradeToPro}
+                onClick={() => setShowUpgrade(true)}
                 style={{
-                  marginLeft: '10px',
-                  padding: '6px 12px',
+                  padding: '10px 20px',
+                  background: 'white',
+                  color: '#f59e0b',
                   border: 'none',
-                  borderRadius: '6px',
-                  background: '#f59e0b',
-                  color: 'white',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '13px'
-                }}
-              >
-                Upgrade for unlimited
-              </button>
-            </div>
-          )}
-        </div>
-
-        {showAddCategory && (
-          <div style={{
-            marginTop: '15px',
-            padding: '15px',
-            border: '1px solid #ddd',
-            borderRadius: '8px',
-            background: '#f9fafb'
-          }}>
-            <select
-              value={newCategoryParent}
-              onChange={(e) => setNewCategoryParent(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px',
-                fontSize: '14px',
-                border: '1px solid #ddd',
-                borderRadius: '6px',
-                marginBottom: '10px',
-                boxSizing: 'border-box'
-              }}
-            >
-              <option value="">Add as main category</option>
-              {mainCategories.map(main => (
-                <option key={main.id} value={main.id}>Add under: {main.name}</option>
-              ))}
-            </select>
-            <input
-              type="text"
-              value={newCategoryName}
-              onChange={(e) => setNewCategoryName(e.target.value)}
-              placeholder="Category name"
-              style={{
-                width: '100%',
-                padding: '10px',
-                fontSize: '14px',
-                border: '1px solid #ddd',
-                borderRadius: '6px',
-                marginBottom: '10px',
-                boxSizing: 'border-box'
-              }}
-            />
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                onClick={handleAddCategory}
-                style={{
-                  padding: '8px 15px',
-                  border: 'none',
-                  borderRadius: '6px',
-                  background: '#10b981',
-                  color: 'white',
+                  borderRadius: '8px',
                   cursor: 'pointer',
                   fontWeight: 'bold'
                 }}
               >
-                Save
-              </button>
-              <button
-                onClick={() => { setShowAddCategory(false); setNewCategoryParent('') }}
-                style={{
-                  padding: '8px 15px',
-                  border: '1px solid #ddd',
-                  borderRadius: '6px',
-                  background: 'white',
-                  cursor: 'pointer'
-                }}
-              >
-                Cancel
+                Upgrade to PRO
               </button>
             </div>
+          )}
+
+          <ChatAssistant
+            expenses={allExpenses}
+            categories={categories}
+            isProMode={isProMode}
+            onUpgradeToPro={() => setShowUpgrade(true)}
+            onAICommand={handleAICommand}
+            onReloadExpenses={handleReloadExpenses}
+            userId={session.user.id}
+            userProfile={userProfile}
+          />
+
+          {isProMode && aiInsights && (
+            <div style={{
+              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              padding: '20px',
+              borderRadius: '12px',
+              marginTop: '20px',
+              color: 'white'
+            }}>
+              <h3 style={{ marginTop: 0 }}>🤖 AI Insights (PRO)</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px' }}>
+                <div>
+                  <p style={{ margin: '5px 0', fontWeight: 'bold' }}>Forecast This Month:</p>
+                  <p style={{ margin: 0, fontSize: '24px' }}>${aiInsights.forecastTotal.toFixed(2)}</p>
+                </div>
+                <div>
+                  <p style={{ margin: '5px 0', fontWeight: 'bold' }}>Recurring Merchants:</p>
+                  <p style={{ margin: 0 }}>{aiInsights.recurringMerchants.join(', ') || 'None'}</p>
+                </div>
+                <div>
+                  <p style={{ margin: '5px 0', fontWeight: 'bold' }}>Top Categories:</p>
+                  {aiInsights.topCategories.map(cat => (
+                    <p key={cat.name} style={{ margin: '2px 0' }}>{cat.name}: ${cat.amount.toFixed(2)}</p>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+          <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+            <AddExpenseForm
+              categories={categories}
+              mainCategories={mainCategories}
+              onAddExpense={handleAddExpense}
+              isProMode={isProMode}
+              onUpgradeToPro={() => setShowUpgrade(true)}
+              userId={session.user.id}
+            />
           </div>
-        )}
+
+          <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+            <MonthlySummary expenses={allExpenses} categories={categories} isProMode={isProMode} />
+          </div>
+        </div>
+
+        <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            <input
+              type="text"
+              placeholder="Search expenses..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{
+                padding: '10px',
+                border: '2px solid #e5e7eb',
+                borderRadius: '8px',
+                flex: 1,
+                marginRight: '10px'
+              }}
+            />
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={(e) => setShowArchived(e.target.checked)}
+              />
+              Show Archived
+            </label>
+          </div>
+
+          <ExpenseList
+            expenses={filteredExpenses}
+            categories={categories}
+            onUpdate={(id, updates) => updateExpense(id, updates, session.user.id)}
+            onArchive={(id) => archiveExpense(id, session.user.id)}
+            onDelete={(id) => deleteExpense(id, session.user.id)}
+            onOpenReceipt={(url) => window.open(url, '_blank')}
+          />
+
+          {pendingUndo && (
+            <div style={{
+              position: 'fixed',
+              bottom: '20px',
+              right: '20px',
+              background: '#1f2937',
+              color: 'white',
+              padding: '15px 20px',
+              borderRadius: '12px',
+              display: 'flex',
+              gap: '15px',
+              alignItems: 'center',
+              boxShadow: '0 4px 6px rgba(0,0,0,0.2)'
+            }}>
+              <span>{pendingUndo.action === 'archive' ? 'Expense archived' : 'Expense deleted'}</span>
+              <button
+                onClick={() => undoAction(session.user.id)}
+                style={{
+                  padding: '8px 15px',
+                  background: '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                Undo
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div style={{ marginBottom: '15px' }}>
-        <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
-          Payment Method <span style={{ color: 'red' }}>*</span>
-        </label>
-        <select
-          value={paymentMethod}
-          onChange={(e) => setPaymentMethod(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '10px',
-            fontSize: '16px',
-            border: '1px solid #ddd',
-            borderRadius: '8px',
-            boxSizing: 'border-box'
-          }}
-        >
-          <option value="card">Card</option>
-          <option value="cash">Cash</option>
-          <option value="apple_pay">Apple Pay</option>
-          <option value="other">Other</option>
-        </select>
-      </div>
+      {showImport && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.7)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            padding: '30px',
+            maxWidth: '800px',
+            width: '90%',
+            maxHeight: '80vh',
+            overflow: 'auto'
+          }}>
+            {parsedTransactions.length === 0 ? (
+              <FileImport onFileSelect={handleImport} onClose={() => setShowImport(false)} />
+            ) : (
+              <ImportPreview
+                transactions={parsedTransactions}
+                categories={categories}
+                onConfirm={handleImportConfirm}
+                onCancel={() => {
+                  setShowImport(false)
+                  setParsedTransactions([])
+                }}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
-      <div style={{ marginBottom: '20px' }}>
-        <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
-          Notes <span style={{ fontSize: '14px', color: '#666' }}>(optional)</span>
-        </label>
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Add any notes..."
-          style={{
-            width: '100%',
-            padding: '10px',
-            fontSize: '14px',
-            border: '1px solid #ddd',
-            borderRadius: '8px',
-            boxSizing: 'border-box',
-            minHeight: '60px',
-            resize: 'vertical'
-          }}
-        />
-      </div>
-
-      <button
-        onClick={handleSave}
-        disabled={isSaving}
-        style={{
-          width: '100%',
-          padding: '15px',
-          fontSize: '18px',
-          fontWeight: 'bold',
-          border: 'none',
-          borderRadius: '8px',
-          cursor: isSaving ? 'not-allowed' : 'pointer',
-          background: isSaving ? '#9ca3af' : saveSuccess ? '#10b981' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          color: 'white'
-        }}
-      >
-        {isSaving ? 'Saving...' : saveSuccess ? '✓ Saved!' : 'Add Expense'}
-      </button>
+      {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
+      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
     </div>
   )
 }
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<MainApp />} />
+        <Route path="/login-history" element={<LoginHistoryPage />} />
+        <Route path="/analytics" element={<AnalyticsPage />} />
+      </Routes>
+    </Router>
+  )
+}
+
+export default App

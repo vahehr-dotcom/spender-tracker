@@ -1,5 +1,5 @@
 import EmotionalIntelligence from './EmotionalIntelligence'
-import ExpenseService from '../services/ExpenseService'
+import ExpenseService from './ExpenseService'
 
 class NovaAgent {
   constructor(memoryManager, tools, isProMode) {

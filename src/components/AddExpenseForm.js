@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { supabase } from '../supabaseClient'
+import ExpenseService from '../lib/ExpenseService'
 
 function getNowLocalDateTime() {
   const now = new Date()
@@ -33,16 +34,16 @@ export default function AddExpenseForm({ categories, mainCategories = [], onAddE
     setIsSaving(true)
     setSaveSuccess(false)
 
-    const expense = {
+    const spentAt = ExpenseService.getLocalISOString(new Date(spentAtLocal))
+
+    const result = await onAddExpense({
       amount: parseFloat(amount),
       merchant,
       category_id: categoryId,
-      spent_at: new Date(spentAtLocal).toISOString(),
+      spent_at: spentAt,
       payment_method: paymentMethod,
       note: notes || null
-    }
-
-    const result = await onAddExpense(expense)
+    })
 
     if (result.success) {
       setSaveSuccess(true)
