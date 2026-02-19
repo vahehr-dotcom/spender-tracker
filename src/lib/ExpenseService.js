@@ -70,6 +70,20 @@ const CATEGORY_KEYWORDS = {
   'Miscellaneous': ['lotto', 'lottery', 'gift card', 'donation', 'charity', 'tip', 'birthday gift', 'holiday gift']
 }
 
+const KNOWN_MERCHANTS = []
+
+// Build flat list of all known merchant keywords for smart extraction
+;(function buildMerchantList() {
+  for (const keywords of Object.values(CATEGORY_KEYWORDS)) {
+    for (const kw of keywords) {
+      if (kw.length >= 3 && /[a-z]/.test(kw)) {
+        KNOWN_MERCHANTS.push(kw)
+      }
+    }
+  }
+  KNOWN_MERCHANTS.sort((a, b) => b.length - a.length)
+})()
+
 class ExpenseService {
 
   static getLocalISOString(date = new Date()) {
@@ -136,6 +150,21 @@ class ExpenseService {
       .trim()
   }
 
+  static findKnownMerchant(text) {
+    const lower = text.toLowerCase()
+    for (const merchant of KNOWN_MERCHANTS) {
+      if (lower.includes(merchant)) {
+        // Find original casing from text
+        const idx = lower.indexOf(merchant)
+        return {
+          name: text.substring(idx, idx + merchant.length).trim(),
+          keyword: merchant
+        }
+      }
+    }
+    return null
+  }
+
   static parseCommand(userMessage) {
     const lower = userMessage.toLowerCase()
 
@@ -146,40 +175,54 @@ class ExpenseService {
     if (!amountMatch) return null
     const amount = parseFloat(amountMatch[1])
 
+    // Strip the command word, amount, and date hints to get the content
+    let content = userMessage
+      .replace(/\b(?:add|spent)\b/gi, '')
+      .replace(/\$?\d+(?:\.\d{2})?/g, '')
+      .replace(/\b(?:today|yesterday|\d+\s+days?\s+ago)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    // Try to find a known merchant/store in the message
+    const knownMerchant = ExpenseService.findKnownMerchant(userMessage)
+
     let merchant = null
+    let description = null
 
-    const atMatch = userMessage.match(/\b(?:at|to|for|in)\s+([a-z0-9\s&'-]+?)(?:\s+(?:today|yesterday|on|last)|\s*$)/i)
-    if (atMatch) {
-      merchant = atMatch[1].trim()
-    }
-
-    if (!merchant) {
-      const afterAmount = userMessage.replace(/(?:add|spent)\s+\$?\d+(?:\.\d{2})?/i, '').trim()
-      const words = afterAmount.split(/\s+/).filter(w => {
-        const cleaned = w.toLowerCase()
-        return cleaned.length > 0 && !(/^(at|to|for|in|today|yesterday|on)$/.test(cleaned))
-      })
-      if (words.length > 0) {
-        merchant = words.join(' ')
+    if (knownMerchant) {
+      merchant = knownMerchant.name
+      // Everything else in content (minus the merchant) is the description
+      const descParts = content.toLowerCase().replace(knownMerchant.keyword, '').trim()
+      const cleaned = ExpenseService.cleanMerchant(descParts)
+      if (cleaned.length > 0) {
+        description = cleaned
       }
-    }
-
-    if (!merchant) {
-      const betweenMatch = userMessage.match(/\$?\d+(?:\.\d{2})?\s+(.+?)(?:\s+(?:today|yesterday|[\w\s]+ago)|$)/i)
-      if (betweenMatch) {
-        merchant = betweenMatch[1].replace(/\b(?:at|to|for|in)\b/gi, '').trim()
+    } else {
+      // No known merchant — try "at/from [store]" pattern
+      const atMatch = userMessage.match(/\b(?:at|from)\s+([a-z0-9\s&'.-]+?)(?:\s+(?:today|yesterday|on|last|\$)|\s*$)/i)
+      if (atMatch) {
+        merchant = atMatch[1].trim()
+        const descParts = content.replace(new RegExp('\\b(?:at|from)\\s+' + merchant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), '').trim()
+        const cleaned = ExpenseService.cleanMerchant(descParts)
+        if (cleaned.length > 0) {
+          description = cleaned
+        }
+      } else {
+        // Fallback — use cleaned content as merchant
+        merchant = ExpenseService.cleanMerchant(content)
       }
     }
 
     if (!merchant) return null
 
-    merchant = ExpenseService.cleanMerchant(merchant)
+    // Capitalize merchant nicely
+    merchant = merchant.replace(/\b\w/g, c => c.toUpperCase())
 
     let dateHint = 'today'
     if (lower.includes('yesterday')) dateHint = 'yesterday'
     else if (lower.match(/\d+\s+days?\s+ago/)) dateHint = lower.match(/\d+\s+days?\s+ago/)[0]
 
-    return { amount, merchant, dateHint }
+    return { amount, merchant, description, dateHint }
   }
 
   static resolveTimestamp(dateHint) {
@@ -246,7 +289,8 @@ class ExpenseService {
       amount: parsed.amount,
       merchant: parsed.merchant,
       categoryId,
-      spentAt
+      spentAt,
+      description: parsed.description
     })
 
     return {

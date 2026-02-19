@@ -373,6 +373,7 @@ function MainApp() {
               placeholder="Search expenses..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+onKeyDown={(e) => e.key === 'Enter' && e.target.blur()}
               style={{
                 padding: '10px',
                 border: '2px solid #e5e7eb',
