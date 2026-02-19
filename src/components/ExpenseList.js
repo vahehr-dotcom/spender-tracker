@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import CategoryPicker from './CategoryPicker'
 
 export default function ExpenseList({
   expenses,
@@ -58,8 +59,8 @@ export default function ExpenseList({
     setEditForm({})
   }
 
-  const handleDelete = (id, merchant) => {
-    if (window.confirm(`Permanently delete $${expenses.find(e => e.id === id)?.amount} at ${merchant}? This cannot be undone.`)) {
+  const handleDelete = (id, merchant, amount) => {
+    if (window.confirm(`Permanently delete $${amount} at ${merchant}? This cannot be undone.`)) {
       onDelete(id)
     }
   }
@@ -76,8 +77,6 @@ export default function ExpenseList({
       return location
     }
   }
-
-  const hasGroupedCategories = mainCategories && mainCategories.length > 0
 
   if (!expenses || expenses.length === 0) {
     return (
@@ -123,7 +122,7 @@ export default function ExpenseList({
                     )}
 
                     <button
-                      onClick={() => handleDelete(e.id, e.merchant)}
+                      onClick={() => handleDelete(e.id, e.merchant, Number(e.amount).toFixed(2))}
                       style={{ ...btnStyle, backgroundColor: '#FF5252', color: 'white' }}
                     >
                       🗑️ Delete
@@ -191,27 +190,12 @@ export default function ExpenseList({
 
                 <div style={fieldStyle}>
                   <label style={labelStyle}>Category</label>
-                  <select
+                  <CategoryPicker
+                    categories={categories}
+                    mainCategories={mainCategories}
                     value={editForm.category_id}
-                    onChange={(e) => setEditForm({ ...editForm, category_id: e.target.value })}
-                    style={inputStyle}
-                  >
-                    <option value="">— Select category —</option>
-                    {hasGroupedCategories ? (
-                      mainCategories.map((main) => (
-                        <optgroup key={main.id} label={main.name}>
-                          <option value={main.id}>{main.name} (General)</option>
-                          {main.subcategories && main.subcategories.map((sub) => (
-                            <option key={sub.id} value={sub.id}>{sub.name}</option>
-                          ))}
-                        </optgroup>
-                      ))
-                    ) : (
-                      categories.filter(c => c.parent_id === null).map(cat => (
-                        <option key={cat.id} value={cat.id}>{cat.name}</option>
-                      ))
-                    )}
-                  </select>
+                    onChange={(id) => setEditForm({ ...editForm, category_id: id })}
+                  />
                 </div>
 
                 <div style={fieldStyle}>

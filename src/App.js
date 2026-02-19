@@ -160,7 +160,8 @@ function MainApp() {
       categoryId: expense.category_id,
       spentAt: expense.spent_at,
       paymentMethod: expense.payment_method,
-      note: expense.note
+      note: expense.note,
+      receiptUrl: expense.receipt_image_url
     })
 
     if (result.success) {

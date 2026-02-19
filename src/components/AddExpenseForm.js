@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { supabase } from '../supabaseClient'
 import ExpenseService from '../lib/ExpenseService'
+import CategoryPicker from './CategoryPicker'
 
 function getNowLocalDateTime() {
   const now = new Date()
@@ -19,11 +20,52 @@ export default function AddExpenseForm({ categories, mainCategories = [], onAddE
   const [paymentMethod, setPaymentMethod] = useState('card')
   const [categoryId, setCategoryId] = useState('')
   const [notes, setNotes] = useState('')
+  const [receipt, setReceipt] = useState(null)
+  const [receiptPreview, setReceiptPreview] = useState(null)
   const [isSaving, setIsSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState('')
   const [newCategoryParent, setNewCategoryParent] = useState('')
+
+  const handleReceiptChange = (e) => {
+    const file = e.target.files[0]
+    if (file) {
+      setReceipt(file)
+      const reader = new FileReader()
+      reader.onload = (ev) => setReceiptPreview(ev.target.result)
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const removeReceipt = () => {
+    setReceipt(null)
+    setReceiptPreview(null)
+  }
+
+  const uploadReceipt = async () => {
+    if (!receipt) return null
+    try {
+      const fileName = `${userId}/${Date.now()}_${receipt.name}`
+      const { error: uploadError } = await supabase.storage
+        .from('receipts')
+        .upload(fileName, receipt)
+
+      if (uploadError) {
+        console.error('Receipt upload error:', uploadError)
+        return null
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('receipts')
+        .getPublicUrl(fileName)
+
+      return urlData.publicUrl
+    } catch (err) {
+      console.error('Receipt upload exception:', err)
+      return null
+    }
+  }
 
   const handleSave = async () => {
     if (!amount || !merchant || !categoryId) {
@@ -34,6 +76,7 @@ export default function AddExpenseForm({ categories, mainCategories = [], onAddE
     setIsSaving(true)
     setSaveSuccess(false)
 
+    const receiptUrl = await uploadReceipt()
     const spentAt = ExpenseService.getLocalISOString(new Date(spentAtLocal))
 
     const result = await onAddExpense({
@@ -42,7 +85,8 @@ export default function AddExpenseForm({ categories, mainCategories = [], onAddE
       category_id: categoryId,
       spent_at: spentAt,
       payment_method: paymentMethod,
-      note: notes || null
+      note: notes || null,
+      receipt_image_url: receiptUrl
     })
 
     if (result.success) {
@@ -52,6 +96,8 @@ export default function AddExpenseForm({ categories, mainCategories = [], onAddE
       setSpentAtLocal(getNowLocalDateTime())
       setCategoryId('')
       setNotes('')
+      setReceipt(null)
+      setReceiptPreview(null)
       setTimeout(() => setSaveSuccess(false), 2000)
     } else {
       alert('Failed to save: ' + (result.error || 'Unknown error'))
@@ -89,8 +135,6 @@ export default function AddExpenseForm({ categories, mainCategories = [], onAddE
 
   const customCategoryCount = categories.filter(c => c.is_custom && c.user_id === userId).length
   const canAddCategory = isProMode || customCategoryCount < 3
-
-  const hasGroupedCategories = mainCategories && mainCategories.length > 0
 
   return (
     <div>
@@ -174,34 +218,12 @@ export default function AddExpenseForm({ categories, mainCategories = [], onAddE
         <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
           Category <span style={{ color: 'red' }}>*</span>
         </label>
-        <select
+        <CategoryPicker
+          categories={categories}
+          mainCategories={mainCategories}
           value={categoryId}
-          onChange={(e) => setCategoryId(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '10px',
-            fontSize: '16px',
-            border: '1px solid #ddd',
-            borderRadius: '8px',
-            boxSizing: 'border-box'
-          }}
-        >
-          <option value="">-- Select Category --</option>
-          {hasGroupedCategories ? (
-            mainCategories.map((main) => (
-              <optgroup key={main.id} label={main.name}>
-                <option value={main.id}>{main.name} (General)</option>
-                {main.subcategories && main.subcategories.map((sub) => (
-                  <option key={sub.id} value={sub.id}>{sub.name}</option>
-                ))}
-              </optgroup>
-            ))
-          ) : (
-            categories.filter(c => c.parent_id === null).map((cat) => (
-              <option key={cat.id} value={cat.id}>{cat.name}</option>
-            ))
-          )}
-        </select>
+          onChange={setCategoryId}
+        />
 
         <div style={{ marginTop: '10px' }}>
           {canAddCategory ? (
@@ -336,6 +358,68 @@ export default function AddExpenseForm({ categories, mainCategories = [], onAddE
           <option value="apple_pay">Apple Pay</option>
           <option value="other">Other</option>
         </select>
+      </div>
+
+      <div style={{ marginBottom: '15px' }}>
+        <label style={{ display: 'block', marginBottom: '5px', fontWeight: '600' }}>
+          Receipt <span style={{ fontSize: '14px', color: '#666' }}>(optional)</span>
+        </label>
+        {!receiptPreview ? (
+          <label style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            border: '2px dashed #ddd',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            background: '#fafafa',
+            fontSize: '14px',
+            color: '#666'
+          }}>
+            📷 Tap to upload receipt
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleReceiptChange}
+              style={{ display: 'none' }}
+            />
+          </label>
+        ) : (
+          <div style={{ position: 'relative', display: 'inline-block' }}>
+            <img
+              src={receiptPreview}
+              alt="Receipt preview"
+              style={{
+                maxWidth: '100%',
+                maxHeight: '150px',
+                borderRadius: '8px',
+                border: '1px solid #ddd'
+              }}
+            />
+            <button
+              onClick={removeReceipt}
+              style={{
+                position: 'absolute',
+                top: '-8px',
+                right: '-8px',
+                width: '24px',
+                height: '24px',
+                borderRadius: '50%',
+                border: 'none',
+                background: '#ef4444',
+                color: 'white',
+                cursor: 'pointer',
+                fontSize: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
       </div>
 
       <div style={{ marginBottom: '20px' }}>

@@ -180,7 +180,7 @@ class ExpenseService {
     return ExpenseService.getLocalISOString(now)
   }
 
-  static async add({ userId, amount, merchant, categoryId, spentAt, paymentMethod = 'card', note = null }) {
+  static async add({ userId, amount, merchant, categoryId, spentAt, paymentMethod = 'card', note = null, receiptUrl = null }) {
     if (!userId || !amount || !merchant || !categoryId) {
       return { success: false, error: 'Missing required fields: userId, amount, merchant, categoryId' }
     }
@@ -193,6 +193,7 @@ class ExpenseService {
       spent_at: spentAt || ExpenseService.getLocalISOString(),
       payment_method: paymentMethod,
       note,
+      receipt_image_url: receiptUrl || null,
       archived: false
     }
 
@@ -243,7 +244,7 @@ class ExpenseService {
     }
   }
 
-  static async addFromForm({ userId, amount, merchant, categoryId, spentAt, paymentMethod, note }) {
+  static async addFromForm({ userId, amount, merchant, categoryId, spentAt, paymentMethod, note, receiptUrl }) {
     return await ExpenseService.add({
       userId,
       amount,
@@ -251,7 +252,8 @@ class ExpenseService {
       categoryId,
       spentAt: spentAt || ExpenseService.getLocalISOString(),
       paymentMethod,
-      note
+      note,
+      receiptUrl
     })
   }
 }
