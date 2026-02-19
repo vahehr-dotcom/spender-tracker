@@ -3,13 +3,7 @@ import { useState } from 'react'
 export default function ExpenseList({
   expenses,
   categories,
-  showArchived,
-  setShowArchived,
-  search,
-  setSearch,
-  runSearch,
-  clearSearch,
-  exportCsv,
+  mainCategories = [],
   isProMode,
   onUpdate,
   onArchive,
@@ -67,58 +61,28 @@ export default function ExpenseList({
   const getLocationLabel = (location) => {
     if (!location) return null
     try {
-      // If it's already an object
       if (typeof location === 'object') {
         return location.label || `${location.lat}, ${location.lng}`
       }
-      // If it's a JSON string, parse it
       const parsed = JSON.parse(location)
       return parsed.label || `${parsed.lat}, ${parsed.lng}`
     } catch (e) {
-      // If parsing fails, return as-is (it's already a plain string)
       return location
     }
   }
 
+  const hasGroupedCategories = mainCategories && mainCategories.length > 0
+
   if (!expenses || expenses.length === 0) {
     return (
-      <div style={{ marginTop: 30 }}>
-        <h2>📊 Expenses</h2>
+      <div>
         <p style={{ opacity: 0.7 }}>No expenses yet. Add your first one above!</p>
       </div>
     )
   }
 
   return (
-    <div style={{ marginTop: 30 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h2 style={{ margin: 0 }}>📊 Expenses ({expenses.length})</h2>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={exportCsv} style={btnStyle}>📥 Export CSV</button>
-          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={showArchived}
-              onChange={(e) => setShowArchived(e.target.checked)}
-              style={{ marginRight: 6 }}
-            />
-            Show archived
-          </label>
-        </div>
-      </div>
-
-      <div style={{ marginBottom: 20, display: 'flex', gap: 10 }}>
-        <input
-          type="text"
-          placeholder="Search expenses..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ ...inputStyle, flex: 1 }}
-        />
-        <button onClick={runSearch} style={btnStyle}>🔍 Search</button>
-        {search && <button onClick={clearSearch} style={btnStyle}>Clear</button>}
-      </div>
-
+    <div>
       {expenses.map(e => {
         const isEditing = editingId === e.id
         const locationLabel = getLocationLabel(e.location)
@@ -149,7 +113,7 @@ export default function ExpenseList({
                     )}
 
                     {!e.archived ? (
-                      <button onClick={() => onArchive(e)} style={btnStyle}>📦 Archive</button>
+                      <button onClick={() => onArchive(e.id)} style={btnStyle}>📦 Archive</button>
                     ) : (
                       <button onClick={() => onDelete(e.id)} style={{ ...btnStyle, backgroundColor: '#FF5252', color: 'white' }}>🗑️ Delete</button>
                     )}
@@ -222,9 +186,20 @@ export default function ExpenseList({
                     style={inputStyle}
                   >
                     <option value="">— Select category —</option>
-                    {categories.map(cat => (
-                      <option key={cat.id} value={cat.id}>{cat.icon} {cat.name}</option>
-                    ))}
+                    {hasGroupedCategories ? (
+                      mainCategories.map((main) => (
+                        <optgroup key={main.id} label={main.name}>
+                          <option value={main.id}>{main.name} (General)</option>
+                          {main.subcategories && main.subcategories.map((sub) => (
+                            <option key={sub.id} value={sub.id}>{sub.name}</option>
+                          ))}
+                        </optgroup>
+                      ))
+                    ) : (
+                      categories.filter(c => c.parent_id === null).map(cat => (
+                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                      ))
+                    )}
                   </select>
                 </div>
 

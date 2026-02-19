@@ -35,7 +35,7 @@ const CATEGORY_KEYWORDS = {
   'Digital Purchases': ['itunes', 'google play', 'digital', 'download', 'ebook'],
   'App Purchases': ['app store', 'in-app', 'app purchase'],
   'Streaming': ['netflix', 'hulu', 'disney+', 'disney plus', 'hbo', 'max', 'paramount', 'peacock', 'apple tv', 'youtube premium', 'spotify', 'pandora', 'tidal'],
-  'Movies & Events': ['movie', 'cinema', 'amc', 'regal', 'concert', 'event', 'tickets', 'ticketmaster', 'stubhub', 'live nation'],
+  'Movies & Events': ['movie', 'cinema', 'amc', 'regal', 'concert', 'ticketmaster', 'stubhub', 'live nation'],
   'Games': ['game', 'playstation', 'xbox', 'nintendo', 'steam', 'gaming'],
   'Books & Music': ['book', 'kindle', 'audible', 'barnes noble', 'music'],
   'Apps & Software': ['software', 'subscription', 'adobe', 'microsoft', 'dropbox', 'icloud', 'google one', 'chatgpt', 'openai'],
@@ -71,7 +71,6 @@ const CATEGORY_KEYWORDS = {
 
 class ExpenseService {
 
-  // ─── TIMESTAMP ────────────────────────────────────────────
   static getLocalISOString(date = new Date()) {
     const offset = -date.getTimezoneOffset()
     const sign = offset >= 0 ? '+' : '-'
@@ -86,17 +85,20 @@ class ExpenseService {
     return `${year}-${month}-${day}T${hour}:${min}:${sec}${sign}${hours}:${minutes}`
   }
 
-  // ─── CATEGORY MATCHING ────────────────────────────────────
   static matchCategoryByKeyword(text) {
     const lower = text.toLowerCase()
+    let bestMatch = null
+    let bestLength = 0
+
     for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
       for (const keyword of keywords) {
-        if (lower.includes(keyword)) {
-          return category
+        if (lower.includes(keyword) && keyword.length > bestLength) {
+          bestMatch = category
+          bestLength = keyword.length
         }
       }
     }
-    return null
+    return bestMatch
   }
 
   static findCategoryId(categoryName, allCategories) {
@@ -126,7 +128,6 @@ class ExpenseService {
     return { id: fallbackId, name: 'Miscellaneous' }
   }
 
-  // ─── PARSE NATURAL LANGUAGE ───────────────────────────────
   static parseCommand(userMessage) {
     const lower = userMessage.toLowerCase()
 
@@ -171,7 +172,6 @@ class ExpenseService {
     return { amount, merchant, dateHint }
   }
 
-  // ─── BUILD TIMESTAMP FROM DATE HINT ───────────────────────
   static resolveTimestamp(dateHint) {
     const now = new Date()
     if (dateHint === 'yesterday') {
@@ -180,7 +180,6 @@ class ExpenseService {
     return ExpenseService.getLocalISOString(now)
   }
 
-  // ─── SINGLE ADD METHOD — THE ONLY WAY TO ADD AN EXPENSE ──
   static async add({ userId, amount, merchant, categoryId, spentAt, paymentMethod = 'card', note = null }) {
     if (!userId || !amount || !merchant || !categoryId) {
       return { success: false, error: 'Missing required fields: userId, amount, merchant, categoryId' }
@@ -218,7 +217,6 @@ class ExpenseService {
     }
   }
 
-  // ─── CONVENIENCE: ADD FROM NATURAL LANGUAGE ───────────────
   static async addFromChat({ userId, userMessage, categories }) {
     const parsed = ExpenseService.parseCommand(userMessage)
     if (!parsed) return { success: false, error: 'Could not parse expense from message' }
@@ -245,7 +243,6 @@ class ExpenseService {
     }
   }
 
-  // ─── CONVENIENCE: ADD FROM MANUAL FORM ────────────────────
   static async addFromForm({ userId, amount, merchant, categoryId, spentAt, paymentMethod, note }) {
     return await ExpenseService.add({
       userId,

@@ -377,6 +377,20 @@ function MainApp() {
                 marginRight: '10px'
               }}
             />
+            <button
+              onClick={handleExport}
+              style={{
+                padding: '8px 16px',
+                border: '1px solid #ddd',
+                borderRadius: '8px',
+                background: 'white',
+                cursor: 'pointer',
+                marginRight: '10px',
+                fontSize: '13px'
+              }}
+            >
+              📥 Export CSV
+            </button>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
               <input
                 type="checkbox"
@@ -390,6 +404,8 @@ function MainApp() {
           <ExpenseList
             expenses={filteredExpenses}
             categories={categories}
+            mainCategories={mainCategories}
+            isProMode={isProMode}
             onUpdate={(id, updates) => updateExpense(id, updates, session.user.id)}
             onArchive={(id) => archiveExpense(id, session.user.id)}
             onDelete={(id) => deleteExpense(id, session.user.id)}
