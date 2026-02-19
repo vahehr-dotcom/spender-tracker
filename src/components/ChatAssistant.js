@@ -5,7 +5,7 @@ import NovaAgent from '../lib/NovaAgent'
 
 let greetedUserId = null
 
-function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICommand, userId, userProfile, notifications = [], onDismissNotification }) {
+function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICommand, userId, userProfile, notifications = [], onDismissNotification, onReloadExpenses }) {
   const [aiInput, setAiInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
   const [isListening, setIsListening] = useState(false)
@@ -25,10 +25,15 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
   const categoriesRef = useRef(categories)
   const initLockRef = useRef(false)
   const onAICommandRef = useRef(onAICommand)
+  const onReloadExpensesRef = useRef(onReloadExpenses)
 
   useEffect(() => {
     onAICommandRef.current = onAICommand
   }, [onAICommand])
+
+  useEffect(() => {
+    onReloadExpensesRef.current = onReloadExpenses
+  }, [onReloadExpenses])
 
   useEffect(() => {
     expensesRef.current = expenses
@@ -50,12 +55,9 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       await memoryRef.current.loadProfile()
 
       const tools = {
-        add_expense: async (params) => {
-          try {
-            const result = await onAICommandRef.current({ action: 'add_expense', data: params })
-            return result
-          } catch (error) {
-            return { success: false, error: error.message }
+        reload_expenses: async () => {
+          if (onReloadExpensesRef.current) {
+            await onReloadExpensesRef.current()
           }
         },
         search: async (params) => {
