@@ -128,11 +128,10 @@ Gently suggest PRO when user tries premium features.`
     const lower = userMessage.toLowerCase()
     console.log('🔍 Agent analyzing:', userMessage)
 
-    if (lower.includes('update') || lower.includes('change') || lower.includes('edit') || lower.includes('correct')) {
-      return await this.handleUpdate(userMessage, expenseData)
-    }
+    // ADD detection FIRST — check if this is an expense being added
+    const isAddIntent = (lower.includes('add') || lower.includes('spent') || lower.includes('bought') || lower.includes('paid') || lower.includes('spend')) && /\$?\d+/.test(lower)
 
-    if ((lower.includes('add') || lower.includes('spent')) && /\$?\d+/.test(lower)) {
+    if (isAddIntent) {
       const categories = expenseData?.categories || []
       const userId = this.memory.userId
 
@@ -140,19 +139,23 @@ Gently suggest PRO when user tries premium features.`
 
       if (result.success) {
         const categoryLabel = result.parsed?.categoryName ? ` → ${result.parsed.categoryName}` : ''
+        const descLabel = result.parsed?.description ? ` (${result.parsed.description})` : ''
         if (this.tools.reload_expenses) {
           await this.tools.reload_expenses()
         }
         return {
           handled: true,
-          response: `✅ Added $${result.parsed.amount} at ${result.parsed.merchant}${categoryLabel}!`
+          response: `✅ Added $${result.parsed.amount} at ${result.parsed.merchant}${descLabel}${categoryLabel}!`
         }
       } else {
-        return {
-          handled: true,
-          response: `❌ Failed to add expense: ${result.error}`
-        }
+        // If add failed, don't return — let it fall through to other handlers or AI
+        console.log('⚠️ Add attempt failed:', result.error)
       }
+    }
+
+    // UPDATE detection — only if NOT an add intent
+    if (!isAddIntent && (lower.includes('update') || lower.includes('change') || lower.includes('edit') || lower.includes('correct'))) {
+      return await this.handleUpdate(userMessage, expenseData)
     }
 
     if (lower.includes('show me') || lower.includes('filter') || lower.includes('find all')) {
