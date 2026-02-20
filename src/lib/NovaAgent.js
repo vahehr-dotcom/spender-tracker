@@ -120,6 +120,27 @@ Gently suggest PRO when user tries premium features.`
     return personality + capabilities + emotionalContext
   }
 
+  async parseExpenseWithAI(userMessage) {
+    try {
+      console.log('🧠 Sending to AI parser:', userMessage)
+      const response = await fetch('/api/parse-expense', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userMessage })
+      })
+      const data = await response.json()
+      if (data.success && data.parsed) {
+        console.log('🧠 AI parsed result:', data.parsed)
+        return data.parsed
+      }
+      console.log('⚠️ AI parser failed, falling back to regex')
+      return null
+    } catch (err) {
+      console.error('❌ AI parser error:', err)
+      return null
+    }
+  }
+
   async detectAndExecute(userMessage, expenseData) {
     if (!this.isProMode) {
       return { handled: false }
@@ -128,18 +149,58 @@ Gently suggest PRO when user tries premium features.`
     const lower = userMessage.toLowerCase()
     console.log('🔍 Agent analyzing:', userMessage)
 
-    // ADD detection FIRST — check if this is an expense being added
-    const isAddIntent = (lower.includes('add') || lower.includes('spent') || lower.includes('bought') || lower.includes('paid') || lower.includes('spend')) && /\$?\d+/.test(lower)
+    // ADD detection — check if this looks like an expense being added
+    const hasAmount = /\$?\d+/.test(lower)
+    const hasSpendVerb = /\b(add|spend|spent|bought|paid|cost|charged)\b/.test(lower)
+    const isAddIntent = hasAmount && hasSpendVerb
 
     if (isAddIntent) {
       const categories = expenseData?.categories || []
       const userId = this.memory.userId
 
-      const result = await ExpenseService.addFromChat({ userId, userMessage, categories })
+      // Try AI parser first
+      const aiParsed = await this.parseExpenseWithAI(userMessage)
+
+      let result
+      if (aiParsed && aiParsed.amount && aiParsed.merchant) {
+        // AI parsed successfully — resolve category and insert
+        const { id: categoryId, name: categoryName } = ExpenseService.resolveCategoryId(
+          aiParsed.merchant, aiParsed.description, userMessage, categories
+        )
+
+        if (!categoryId) {
+          return { handled: true, response: '❌ No categories available to assign.' }
+        }
+
+        const spentAt = ExpenseService.resolveTimestamp(aiParsed.dateHint || 'today')
+
+        const insertResult = await ExpenseService.add({
+          userId,
+          amount: aiParsed.amount,
+          merchant: aiParsed.merchant,
+          categoryId,
+          spentAt,
+          description: aiParsed.description || null
+        })
+
+        result = {
+          ...insertResult,
+          parsed: {
+            amount: aiParsed.amount,
+            merchant: aiParsed.merchant,
+            description: aiParsed.description,
+            categoryName
+          }
+        }
+      } else {
+        // Fallback to regex parser
+        console.log('⚠️ Using regex fallback parser')
+        result = await ExpenseService.addFromChat({ userId, userMessage, categories })
+      }
 
       if (result.success) {
-        const categoryLabel = result.parsed?.categoryName ? ` → ${result.parsed.categoryName}` : ''
         const descLabel = result.parsed?.description ? ` (${result.parsed.description})` : ''
+        const categoryLabel = result.parsed?.categoryName ? ` → ${result.parsed.categoryName}` : ''
         if (this.tools.reload_expenses) {
           await this.tools.reload_expenses()
         }
@@ -148,7 +209,6 @@ Gently suggest PRO when user tries premium features.`
           response: `✅ Added $${result.parsed.amount} at ${result.parsed.merchant}${descLabel}${categoryLabel}!`
         }
       } else {
-        // If add failed, don't return — let it fall through to other handlers or AI
         console.log('⚠️ Add attempt failed:', result.error)
       }
     }
