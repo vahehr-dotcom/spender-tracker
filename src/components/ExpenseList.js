@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../supabaseClient'
 import CategoryPicker from './CategoryPicker'
+import CategoryResolver from '../lib/CategoryResolver'
 
 export default function ExpenseList({
   expenses,
@@ -33,6 +34,7 @@ export default function ExpenseList({
       merchant: expense.merchant,
       description: expense.description || '',
       category_id: expense.category_id || '',
+      original_category_id: expense.category_id || '',
       payment_method: expense.payment_method,
       spent_at: new Date(expense.spent_at).toISOString().slice(0, 16),
       is_tax_deductible: expense.is_tax_deductible || false,
@@ -108,6 +110,20 @@ export default function ExpenseList({
     }
 
     await onUpdate(expenseId, updated)
+
+    // Learning loop: if user changed the category, record the correction
+    if (editForm.category_id !== editForm.original_category_id && editForm.merchant && userId) {
+      const newCatName = categoryName(editForm.category_id)
+      if (newCatName && newCatName !== '—') {
+        console.log('🧠 Learning: user corrected', editForm.merchant, '→', newCatName)
+        CategoryResolver.recordCorrection(userId, editForm.merchant, newCatName).catch(() => {})
+        CategoryResolver.log(
+          userId, expenseId, editForm.merchant,
+          newCatName, 'user_correction', 1.0
+        ).catch(() => {})
+      }
+    }
+
     setEditingId(null)
     setEditForm({})
     setEditReceipt(null)
