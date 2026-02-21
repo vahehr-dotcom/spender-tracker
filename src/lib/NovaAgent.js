@@ -1,5 +1,6 @@
 import EmotionalIntelligence from './EmotionalIntelligence'
 import ExpenseService from './ExpenseService'
+import CategoryResolver from './CategoryResolver'
 
 class NovaAgent {
   constructor(memoryManager, tools, isProMode) {
@@ -163,12 +164,16 @@ Gently suggest PRO when user tries premium features.`
 
       let result
       if (aiParsed && aiParsed.amount && aiParsed.merchant) {
-        // AI parsed successfully — resolve category and insert
-        const { id: categoryId, name: categoryName } = ExpenseService.resolveCategoryId(
-          aiParsed.merchant, aiParsed.description, userMessage, categories
-        )
+        // AI parsed successfully — use waterfall resolver for category
+        const resolved = await CategoryResolver.resolve({
+          merchant: aiParsed.merchant,
+          description: aiParsed.description,
+          fullMessage: userMessage,
+          categories,
+          userId
+        })
 
-        if (!categoryId) {
+        if (!resolved.id) {
           return { handled: true, response: '❌ No categories available to assign.' }
         }
 
@@ -178,10 +183,18 @@ Gently suggest PRO when user tries premium features.`
           userId,
           amount: aiParsed.amount,
           merchant: aiParsed.merchant,
-          categoryId,
+          categoryId: resolved.id,
           spentAt,
           description: aiParsed.description || null
         })
+
+        // Log how it was categorized
+        if (insertResult.success && insertResult.data) {
+          CategoryResolver.log(
+            userId, insertResult.data.id, aiParsed.merchant,
+            resolved.name, resolved.resolvedBy, resolved.confidence
+          ).catch(() => {})
+        }
 
         result = {
           ...insertResult,
@@ -189,13 +202,50 @@ Gently suggest PRO when user tries premium features.`
             amount: aiParsed.amount,
             merchant: aiParsed.merchant,
             description: aiParsed.description,
-            categoryName
+            categoryName: resolved.name
           }
         }
       } else {
-        // Fallback to regex parser
+        // Fallback to regex parser — also uses waterfall
         console.log('⚠️ Using regex fallback parser')
-        result = await ExpenseService.addFromChat({ userId, userMessage, categories })
+        const parsed = ExpenseService.parseCommand(userMessage)
+        if (parsed) {
+          const resolved = await CategoryResolver.resolve({
+            merchant: parsed.merchant,
+            description: parsed.description,
+            fullMessage: userMessage,
+            categories,
+            userId
+          })
+
+          if (!resolved.id) {
+            return { handled: true, response: '❌ No categories available to assign.' }
+          }
+
+          const spentAt = ExpenseService.resolveTimestamp(parsed.dateHint)
+          const insertResult = await ExpenseService.add({
+            userId,
+            amount: parsed.amount,
+            merchant: parsed.merchant,
+            categoryId: resolved.id,
+            spentAt,
+            description: parsed.description
+          })
+
+          if (insertResult.success && insertResult.data) {
+            CategoryResolver.log(
+              userId, insertResult.data.id, parsed.merchant,
+              resolved.name, resolved.resolvedBy, resolved.confidence
+            ).catch(() => {})
+          }
+
+          result = {
+            ...insertResult,
+            parsed: { ...parsed, categoryName: resolved.name }
+          }
+        } else {
+          result = { success: false, error: 'Could not parse expense' }
+        }
       }
 
       if (result.success) {
