@@ -25,6 +25,31 @@ export default function ExpenseList({
     return c ? c.name : '—'
   }
 
+  const toLocalDatetimeString = (dateStr) => {
+    const d = new Date(dateStr)
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    const hours = String(d.getHours()).padStart(2, '0')
+    const minutes = String(d.getMinutes()).padStart(2, '0')
+    return `${year}-${month}-${day}T${hours}:${minutes}`
+  }
+
+  const toLocalISOString = (dateStr) => {
+    const d = new Date(dateStr)
+    const offset = -d.getTimezoneOffset()
+    const sign = offset >= 0 ? '+' : '-'
+    const hrs = String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0')
+    const mins = String(Math.abs(offset) % 60).padStart(2, '0')
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    const hours = String(d.getHours()).padStart(2, '0')
+    const minutes = String(d.getMinutes()).padStart(2, '0')
+    const seconds = String(d.getSeconds()).padStart(2, '0')
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}${sign}${hrs}:${mins}`
+  }
+
   const startEdit = (expense) => {
     setEditingId(expense.id)
     setEditReceipt(null)
@@ -36,7 +61,7 @@ export default function ExpenseList({
       category_id: expense.category_id || '',
       original_category_id: expense.category_id || '',
       payment_method: expense.payment_method,
-      spent_at: new Date(expense.spent_at).toISOString().slice(0, 16),
+      spent_at: toLocalDatetimeString(expense.spent_at),
       is_tax_deductible: expense.is_tax_deductible || false,
       is_reimbursable: expense.is_reimbursable || false,
       employer_or_client: expense.employer_or_client || '',
@@ -100,7 +125,7 @@ export default function ExpenseList({
       description: editForm.description || null,
       category_id: editForm.category_id || null,
       payment_method: editForm.payment_method,
-      spent_at: new Date(editForm.spent_at).toISOString(),
+      spent_at: toLocalISOString(editForm.spent_at),
       is_tax_deductible: editForm.is_tax_deductible,
       is_reimbursable: editForm.is_reimbursable,
       employer_or_client: editForm.employer_or_client || null,
