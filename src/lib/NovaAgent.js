@@ -158,6 +158,19 @@ Gently suggest PRO when user tries premium features.`
     }
   }
 
+  async getProactiveAlert(userId, categoryName) {
+    try {
+      const alerts = await SpendingInsights.getWeeklyAlerts(userId)
+      const relevant = alerts.find(a => a.includes(categoryName))
+      if (relevant) {
+        return `\n\n📊 Heads up — ${relevant}`
+      }
+    } catch (err) {
+      console.warn('⚠️ Proactive alert check failed:', err)
+    }
+    return ''
+  }
+
   async detectAndExecute(userMessage, expenseData) {
     if (!this.isProMode) {
       return { handled: false }
@@ -270,9 +283,16 @@ Gently suggest PRO when user tries premium features.`
         if (this.tools.reload_expenses) {
           await this.tools.reload_expenses()
         }
+
+        // Check for proactive spending alert
+        let alert = ''
+        if (result.parsed?.categoryName) {
+          alert = await this.getProactiveAlert(this.memory.userId, result.parsed.categoryName)
+        }
+
         return {
           handled: true,
-          response: `✅ Added $${result.parsed.amount} at ${result.parsed.merchant}${descLabel}${categoryLabel}!`
+          response: `✅ Added $${result.parsed.amount} at ${result.parsed.merchant}${descLabel}${categoryLabel}!${alert}`
         }
       } else {
         console.log('⚠️ Add attempt failed:', result.error)
