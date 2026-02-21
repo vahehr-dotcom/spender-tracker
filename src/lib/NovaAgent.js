@@ -418,13 +418,3 @@ Gently suggest PRO when user tries premium features.`
 }
 
 export default NovaAgent
-```
-
-Replace the file and save. Now I also need to fix the one line in ChatAssistant.js that calls `buildSystemPrompt`. In ChatAssistant.js, find:
-```
-          const systemPrompt = agentRef.current.buildSystemPrompt(expenseData)
-```
-
-Replace with:
-```
-          const systemPrompt = await agentRef.current.buildSystemPrompt(expenseData)
