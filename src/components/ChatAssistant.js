@@ -11,6 +11,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
   const [isListening, setIsListening] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [lastResponse, setLastResponse] = useState('')
+  const [lastUserMessage, setLastUserMessage] = useState('')
   const [voiceTranscript, setVoiceTranscript] = useState('')
   const [shouldAutoSubmit, setShouldAutoSubmit] = useState(false)
   const [isInitialized, setIsInitialized] = useState(false)
@@ -227,12 +228,21 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     }
   }
 
+  const stopSpeaking = () => {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+    }
+    setIsSpeaking(false)
+  }
+
   const clearChat = () => {
     if (window.confirm('Clear conversation history?')) {
       if (memoryRef.current) {
         memoryRef.current.clearSession()
       }
       setLastResponse('')
+      setLastUserMessage('')
     }
   }
 
@@ -261,19 +271,22 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     }
   }
 
-  const handleAISubmit = async () => {
+  const handleAISubmit = async (overrideMessage) => {
     if (!isInitialized) {
       setLastResponse('⚠️ Nova is initializing... please wait.')
       return
     }
 
-    if (!aiInput.trim()) return
-    const userMessage = aiInput.trim()
+    const userMessage = overrideMessage || aiInput.trim()
+    if (!userMessage) return
     setAiInput('')
     setIsThinking(true)
+    setLastUserMessage(userMessage)
 
     try {
-      memoryRef.current.addMessage('user', userMessage)
+      if (!overrideMessage) {
+        memoryRef.current.addMessage('user', userMessage)
+      }
 
       let response = ''
 
@@ -289,7 +302,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
         if (agentResult.handled) {
           response = agentResult.response
         } else {
-         const systemPrompt = await agentRef.current.buildSystemPrompt(expenseData)
+          const systemPrompt = await agentRef.current.buildSystemPrompt(expenseData)
           const messages = agentRef.current.buildMessages(systemPrompt, userMessage)
           const apiResponse = await fetch('/api/chat', {
             method: 'POST',
@@ -317,7 +330,10 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       }
 
       setLastResponse(response)
-      memoryRef.current.addMessage('assistant', response)
+
+      if (!overrideMessage) {
+        memoryRef.current.addMessage('assistant', response)
+      }
 
       if (isProMode) {
         await memoryRef.current.saveConversation('user', userMessage)
@@ -325,12 +341,17 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
         await memoryRef.current.learnFromConversation(userMessage, response)
       }
 
-      speak(response)
     } catch (err) {
       console.error('AI error:', err)
       setLastResponse('❌ Sorry, something went wrong.')
     } finally {
       setIsThinking(false)
+    }
+  }
+
+  const handleRegenerate = () => {
+    if (lastUserMessage && !isThinking) {
+      handleAISubmit(lastUserMessage)
     }
   }
 
@@ -466,7 +487,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
           </button>
         )}
         <button
-          onClick={handleAISubmit}
+          onClick={() => handleAISubmit()}
           disabled={isThinking || !aiInput.trim()}
           style={{
             padding: '12px 20px',
@@ -490,9 +511,45 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
           marginTop: '15px'
         }}>
           <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{lastResponse}</p>
-          {isSpeaking && (
-            <p style={{ margin: '10px 0 0 0', fontSize: '12px', opacity: 0.8 }}>🔊 Speaking...</p>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
+            {isProMode && (
+              <button
+                onClick={isSpeaking ? stopSpeaking : () => speak(lastResponse)}
+                disabled={isThinking}
+                style={{
+                  background: isSpeaking ? 'rgba(239, 68, 68, 0.4)' : 'rgba(255,255,255,0.15)',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  borderRadius: '6px',
+                  color: 'white',
+                  cursor: isThinking ? 'not-allowed' : 'pointer',
+                  padding: '5px 12px',
+                  fontSize: '13px'
+                }}
+              >
+                {isSpeaking ? '⏹️ Stop' : '🔊 Listen'}
+              </button>
+            )}
+            {isProMode && lastUserMessage && (
+              <button
+                onClick={handleRegenerate}
+                disabled={isThinking}
+                style={{
+                  background: 'rgba(255,255,255,0.15)',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  borderRadius: '6px',
+                  color: 'white',
+                  cursor: isThinking ? 'not-allowed' : 'pointer',
+                  padding: '5px 12px',
+                  fontSize: '13px'
+                }}
+              >
+                🔄 Regenerate
+              </button>
+            )}
+            {isSpeaking && (
+              <span style={{ fontSize: '12px', opacity: 0.8 }}>Speaking...</span>
+            )}
+          </div>
         </div>
       )}
 
