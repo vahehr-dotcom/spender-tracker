@@ -250,7 +250,7 @@ Gently suggest PRO when user tries premium features.`
 
       if (result.success) {
         const descLabel = result.parsed?.description ? ` (${result.parsed.description})` : ''
-        const categoryLabel = result.parsed?.categoryName ? ` → ${result.parsed.categoryName}` : ''
+        const categoryLabel = result.parsed?.categoryName ? ` under ${result.parsed.categoryName}` : ''
         if (this.tools.reload_expenses) {
           await this.tools.reload_expenses()
         }
