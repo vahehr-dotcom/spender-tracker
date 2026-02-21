@@ -1,6 +1,7 @@
 import EmotionalIntelligence from './EmotionalIntelligence'
 import ExpenseService from './ExpenseService'
 import CategoryResolver from './CategoryResolver'
+import SpendingInsights from './SpendingInsights'
 
 class NovaAgent {
   constructor(memoryManager, tools, isProMode) {
@@ -9,7 +10,7 @@ class NovaAgent {
     this.isProMode = isProMode
   }
 
-  buildSystemPrompt(expenseData) {
+  async buildSystemPrompt(expenseData) {
     const nickname = this.memory.getNickname()
     const responseStyle = this.memory.getResponseStyle()
     const memoryContext = this.memory.buildMemoryContext()
@@ -61,6 +62,8 @@ ${memoryContext}`
 - Respond warmly: "Done! Added/Updated X to $Y" not "I'll try to add/update"
 - Read emotional cues and adjust your tone accordingly
 - Celebrate wins genuinely, support during struggles empathetically
+- When you have spending insights, weave them naturally into conversation — don't dump data
+- If you notice a spending spike, mention it casually like a friend would: "By the way, looks like dining's been adding up this week"
 
 **Available Expenses (Most Recent 50):**
 ${expenses.length > 0 ? JSON.stringify(expenses.slice(0, 50).map(exp => ({
@@ -118,7 +121,20 @@ Gently suggest PRO when user tries premium features.`
       }
     }
 
-    return personality + capabilities + emotionalContext
+    // Spending insights for PRO users
+    let spendingContext = ''
+    if (this.isProMode && this.memory.userId) {
+      try {
+        spendingContext = await SpendingInsights.buildInsightsForNova(this.memory.userId)
+        if (spendingContext) {
+          console.log('📊 Spending insights loaded for Nova')
+        }
+      } catch (err) {
+        console.error('❌ SpendingInsights error:', err)
+      }
+    }
+
+    return personality + capabilities + emotionalContext + spendingContext
   }
 
   async parseExpenseWithAI(userMessage) {
@@ -402,3 +418,13 @@ Gently suggest PRO when user tries premium features.`
 }
 
 export default NovaAgent
+```
+
+Replace the file and save. Now I also need to fix the one line in ChatAssistant.js that calls `buildSystemPrompt`. In ChatAssistant.js, find:
+```
+          const systemPrompt = agentRef.current.buildSystemPrompt(expenseData)
+```
+
+Replace with:
+```
+          const systemPrompt = await agentRef.current.buildSystemPrompt(expenseData)
