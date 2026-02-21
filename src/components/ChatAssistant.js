@@ -289,7 +289,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
         if (agentResult.handled) {
           response = agentResult.response
         } else {
-          const systemPrompt = agentRef.current.buildSystemPrompt(expenseData)
+         const systemPrompt = await agentRef.current.buildSystemPrompt(expenseData)
           const messages = agentRef.current.buildMessages(systemPrompt, userMessage)
           const apiResponse = await fetch('/api/chat', {
             method: 'POST',
