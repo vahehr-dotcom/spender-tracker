@@ -8,6 +8,7 @@ class NovaAgent {
     this.memory = memoryManager
     this.tools = tools
     this.isProMode = isProMode
+    this.pendingExpense = null
   }
 
   async buildSystemPrompt(expenseData) {
@@ -121,7 +122,6 @@ Gently suggest PRO when user tries premium features.`
       }
     }
 
-    // Spending insights for PRO users
     let spendingContext = ''
     if (this.isProMode && this.memory.userId) {
       try {
@@ -150,7 +150,7 @@ Gently suggest PRO when user tries premium features.`
         console.log('🧠 AI parsed result:', data.parsed)
         return data.parsed
       }
-      console.log('⚠️ AI parser failed, falling back to regex')
+      console.log('⚠️ AI parser returned no result')
       return null
     } catch (err) {
       console.error('❌ AI parser error:', err)
@@ -171,6 +171,51 @@ Gently suggest PRO when user tries premium features.`
     return ''
   }
 
+  async addExpense(parsed, expenseData) {
+    const categories = expenseData?.categories || []
+    const userId = this.memory.userId
+
+    const resolved = await CategoryResolver.resolve({
+      merchant: parsed.merchant,
+      description: parsed.description,
+      fullMessage: '',
+      categories,
+      userId
+    })
+
+    if (!resolved.id) {
+      return { success: false, error: 'No categories available' }
+    }
+
+    const spentAt = ExpenseService.resolveTimestamp(parsed.dateHint || 'today')
+
+    const insertResult = await ExpenseService.add({
+      userId,
+      amount: parsed.amount,
+      merchant: parsed.merchant,
+      categoryId: resolved.id,
+      spentAt,
+      description: parsed.description || null
+    })
+
+    if (insertResult.success && insertResult.data) {
+      CategoryResolver.log(
+        userId, insertResult.data.id, parsed.merchant,
+        resolved.name, resolved.resolvedBy, resolved.confidence
+      ).catch(() => {})
+    }
+
+    return {
+      ...insertResult,
+      parsed: {
+        amount: parsed.amount,
+        merchant: parsed.merchant,
+        description: parsed.description,
+        categoryName: resolved.name
+      }
+    }
+  }
+
   async detectAndExecute(userMessage, expenseData) {
     if (!this.isProMode) {
       return { handled: false }
@@ -179,103 +224,52 @@ Gently suggest PRO when user tries premium features.`
     const lower = userMessage.toLowerCase()
     console.log('🔍 Agent analyzing:', userMessage)
 
-    // ADD detection — check if this looks like an expense being added
-    const hasAmount = /\$?\d+/.test(lower)
-    const hasSpendVerb = /\b(add|spend|spent|bought|paid|cost|charged)\b/.test(lower)
-    const isAddIntent = hasAmount && hasSpendVerb
+    // Check if user is confirming a pending expense suggestion
+    if (this.pendingExpense) {
+      const isYes = /\b(yes|yeah|yep|yup|sure|ok|okay|do it|go ahead|add it|please|confirm)\b/.test(lower)
+      const isNo = /\b(no|nah|nope|don't|cancel|skip|never\s*mind)\b/.test(lower)
 
-    if (isAddIntent) {
-      const categories = expenseData?.categories || []
-      const userId = this.memory.userId
+      if (isYes) {
+        const pending = this.pendingExpense
+        this.pendingExpense = null
 
-      // Try AI parser first
-      const aiParsed = await this.parseExpenseWithAI(userMessage)
+        const result = await this.addExpense(pending, expenseData)
 
-      let result
-      if (aiParsed && aiParsed.amount && aiParsed.merchant) {
-        // AI parsed successfully — use waterfall resolver for category
-        const resolved = await CategoryResolver.resolve({
-          merchant: aiParsed.merchant,
-          description: aiParsed.description,
-          fullMessage: userMessage,
-          categories,
-          userId
-        })
-
-        if (!resolved.id) {
-          return { handled: true, response: '❌ No categories available to assign.' }
-        }
-
-        const spentAt = ExpenseService.resolveTimestamp(aiParsed.dateHint || 'today')
-
-        const insertResult = await ExpenseService.add({
-          userId,
-          amount: aiParsed.amount,
-          merchant: aiParsed.merchant,
-          categoryId: resolved.id,
-          spentAt,
-          description: aiParsed.description || null
-        })
-
-        // Log how it was categorized
-        if (insertResult.success && insertResult.data) {
-          CategoryResolver.log(
-            userId, insertResult.data.id, aiParsed.merchant,
-            resolved.name, resolved.resolvedBy, resolved.confidence
-          ).catch(() => {})
-        }
-
-        result = {
-          ...insertResult,
-          parsed: {
-            amount: aiParsed.amount,
-            merchant: aiParsed.merchant,
-            description: aiParsed.description,
-            categoryName: resolved.name
-          }
-        }
-      } else {
-        // Fallback to regex parser — also uses waterfall
-        console.log('⚠️ Using regex fallback parser')
-        const parsed = ExpenseService.parseCommand(userMessage)
-        if (parsed) {
-          const resolved = await CategoryResolver.resolve({
-            merchant: parsed.merchant,
-            description: parsed.description,
-            fullMessage: userMessage,
-            categories,
-            userId
-          })
-
-          if (!resolved.id) {
-            return { handled: true, response: '❌ No categories available to assign.' }
+        if (result.success) {
+          const descLabel = result.parsed?.description ? ` (${result.parsed.description})` : ''
+          const categoryLabel = result.parsed?.categoryName ? ` under ${result.parsed.categoryName}` : ''
+          if (this.tools.reload_expenses) {
+            await this.tools.reload_expenses()
           }
 
-          const spentAt = ExpenseService.resolveTimestamp(parsed.dateHint)
-          const insertResult = await ExpenseService.add({
-            userId,
-            amount: parsed.amount,
-            merchant: parsed.merchant,
-            categoryId: resolved.id,
-            spentAt,
-            description: parsed.description
-          })
-
-          if (insertResult.success && insertResult.data) {
-            CategoryResolver.log(
-              userId, insertResult.data.id, parsed.merchant,
-              resolved.name, resolved.resolvedBy, resolved.confidence
-            ).catch(() => {})
+          let alert = ''
+          if (result.parsed?.categoryName) {
+            alert = await this.getProactiveAlert(this.memory.userId, result.parsed.categoryName)
           }
 
-          result = {
-            ...insertResult,
-            parsed: { ...parsed, categoryName: resolved.name }
+          return {
+            handled: true,
+            response: `✅ Done! Added $${result.parsed.amount} at ${result.parsed.merchant}${descLabel}${categoryLabel}!${alert}`
           }
         } else {
-          result = { success: false, error: 'Could not parse expense' }
+          return { handled: true, response: `❌ Failed to add: ${result.error}` }
         }
+      } else if (isNo) {
+        this.pendingExpense = null
+        return { handled: true, response: 'No problem, I won\'t add it. 👍' }
       }
+      // If neither yes nor no, clear pending and continue normally
+      this.pendingExpense = null
+    }
+
+    // Send every message to AI parser for intent detection
+    const aiParsed = await this.parseExpenseWithAI(userMessage)
+
+    if (aiParsed && aiParsed.intent === 'add' && aiParsed.amount && aiParsed.merchant) {
+      // Direct add — user clearly wants to add
+      console.log('💰 ADD intent detected:', aiParsed)
+
+      const result = await this.addExpense(aiParsed, expenseData)
 
       if (result.success) {
         const descLabel = result.parsed?.description ? ` (${result.parsed.description})` : ''
@@ -284,7 +278,6 @@ Gently suggest PRO when user tries premium features.`
           await this.tools.reload_expenses()
         }
 
-        // Check for proactive spending alert
         let alert = ''
         if (result.parsed?.categoryName) {
           alert = await this.getProactiveAlert(this.memory.userId, result.parsed.categoryName)
@@ -296,11 +289,57 @@ Gently suggest PRO when user tries premium features.`
         }
       } else {
         console.log('⚠️ Add attempt failed:', result.error)
+        // Fall through to regex fallback
+        const parsed = ExpenseService.parseCommand(userMessage)
+        if (parsed) {
+          const fallbackResult = await this.addExpense(parsed, expenseData)
+          if (fallbackResult.success) {
+            const descLabel = fallbackResult.parsed?.description ? ` (${fallbackResult.parsed.description})` : ''
+            const categoryLabel = fallbackResult.parsed?.categoryName ? ` under ${fallbackResult.parsed.categoryName}` : ''
+            if (this.tools.reload_expenses) {
+              await this.tools.reload_expenses()
+            }
+            return {
+              handled: true,
+              response: `✅ Added $${fallbackResult.parsed.amount} at ${fallbackResult.parsed.merchant}${descLabel}${categoryLabel}!`
+            }
+          }
+        }
       }
     }
 
-    // UPDATE detection — only if NOT an add intent
-    if (!isAddIntent && (lower.includes('update') || lower.includes('change') || lower.includes('edit') || lower.includes('correct'))) {
+    if (aiParsed && aiParsed.intent === 'suggest' && aiParsed.amount && aiParsed.merchant) {
+      // Conversational mention of spending — offer to add
+      console.log('💬 SUGGEST intent detected:', aiParsed)
+
+      const categories = expenseData?.categories || []
+      const resolved = await CategoryResolver.resolve({
+        merchant: aiParsed.merchant,
+        description: aiParsed.description,
+        fullMessage: userMessage,
+        categories,
+        userId: this.memory.userId
+      })
+
+      const categoryName = resolved?.name || 'Miscellaneous'
+
+      // Store pending expense for confirmation
+      this.pendingExpense = {
+        amount: aiParsed.amount,
+        merchant: aiParsed.merchant,
+        description: aiParsed.description,
+        dateHint: aiParsed.dateHint
+      }
+
+      const descLabel = aiParsed.description ? ` for ${aiParsed.description}` : ''
+      return {
+        handled: true,
+        response: `That's a big one! $${aiParsed.amount} at ${aiParsed.merchant}${descLabel}. Want me to add that to your expenses under ${categoryName}?`
+      }
+    }
+
+    // UPDATE detection
+    if (lower.includes('update') || lower.includes('change') || lower.includes('edit') || lower.includes('correct')) {
       return await this.handleUpdate(userMessage, expenseData)
     }
 
@@ -310,8 +349,8 @@ Gently suggest PRO when user tries premium features.`
         console.log('🔎 SEARCH detected:', query)
         try {
           const result = await this.tools.search({ query })
-          return { 
-            handled: true, 
+          return {
+            handled: true,
             response: `🔍 Searching for: ${query}`
           }
         } catch (error) {
@@ -328,8 +367,8 @@ Gently suggest PRO when user tries premium features.`
       console.log('📥 EXPORT detected')
       try {
         await this.tools.export()
-        return { 
-          handled: true, 
+        return {
+          handled: true,
           response: '📥 Exporting your expenses...'
         }
       } catch (error) {
@@ -352,8 +391,8 @@ Gently suggest PRO when user tries premium features.`
     const updates = {}
     let query = ''
 
-    if (userMessage.toLowerCase().includes('most recent') || 
-        userMessage.toLowerCase().includes('latest') || 
+    if (userMessage.toLowerCase().includes('most recent') ||
+        userMessage.toLowerCase().includes('latest') ||
         userMessage.toLowerCase().includes('last')) {
       query = 'most_recent'
       console.log('📍 Target: most recent')
@@ -407,10 +446,10 @@ Gently suggest PRO when user tries premium features.`
       console.log('🚀 Executing update:', { query, updates })
       try {
         const result = await this.tools.update_expense({ query, updates })
-        return { 
-          handled: true, 
-          response: result?.success 
-            ? `✅ Updated expense to $${updates.amount}!` 
+        return {
+          handled: true,
+          response: result?.success
+            ? `✅ Updated expense to $${updates.amount}!`
             : `❌ Failed to update: ${result?.error || 'Unknown error'}`
         }
       } catch (error) {
