@@ -329,10 +329,14 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
         response = data.choices[0].message.content
       }
 
-      setLastResponse(response)
+    setLastResponse(response)
 
       if (!overrideMessage) {
         memoryRef.current.addMessage('assistant', response)
+      }
+
+      if (isProMode) {
+        speak(response)
       }
 
       if (isProMode) {
