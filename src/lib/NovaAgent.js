@@ -11,14 +11,20 @@ class NovaAgent {
     this.pendingExpense = null
   }
 
+  isSimilar(a, b) {
+    if (!a || !b) return true
+    const aWords = a.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 2)
+    const bWords = b.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 2)
+    const aInB = aWords.filter(w => bWords.some(bw => bw.includes(w) || w.includes(bw)))
+    return aInB.length >= Math.ceil(aWords.length * 0.5)
+  }
+
   buildExpenseLabel(parsed) {
     const merchant = parsed?.merchant || ''
     const desc = parsed?.description || ''
     const category = parsed?.categoryName || ''
 
-    const merchantLower = merchant.toLowerCase().replace(/[^a-z0-9]/g, '')
-    const descLower = desc.toLowerCase().replace(/[^a-z0-9]/g, '')
-    const isDuplicate = !desc || merchantLower === descLower || merchantLower.includes(descLower) || descLower.includes(merchantLower)
+    const isDuplicate = !desc || this.isSimilar(merchant, desc)
 
     const descLabel = isDuplicate ? '' : ` (${desc})`
     const categoryLabel = category ? ` under ${category}` : ''
@@ -340,9 +346,7 @@ Gently suggest PRO when user tries premium features.`
         dateHint: aiParsed.dateHint
       }
 
-      const merchantLower = aiParsed.merchant?.toLowerCase().replace(/[^a-z0-9]/g, '') || ''
-      const descLower = aiParsed.description?.toLowerCase().replace(/[^a-z0-9]/g, '') || ''
-      const isDuplicate = !aiParsed.description || merchantLower === descLower || merchantLower.includes(descLower) || descLower.includes(merchantLower)
+      const isDuplicate = !aiParsed.description || this.isSimilar(aiParsed.merchant, aiParsed.description)
       const descLabel = isDuplicate ? '' : ` for ${aiParsed.description}`
 
       return {
