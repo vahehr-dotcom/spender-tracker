@@ -11,6 +11,21 @@ class NovaAgent {
     this.pendingExpense = null
   }
 
+  buildExpenseLabel(parsed) {
+    const merchant = parsed?.merchant || ''
+    const desc = parsed?.description || ''
+    const category = parsed?.categoryName || ''
+
+    const merchantLower = merchant.toLowerCase().replace(/[^a-z0-9]/g, '')
+    const descLower = desc.toLowerCase().replace(/[^a-z0-9]/g, '')
+    const isDuplicate = !desc || merchantLower === descLower || merchantLower.includes(descLower) || descLower.includes(merchantLower)
+
+    const descLabel = isDuplicate ? '' : ` (${desc})`
+    const categoryLabel = category ? ` under ${category}` : ''
+
+    return { descLabel, categoryLabel }
+  }
+
   async buildSystemPrompt(expenseData) {
     const nickname = this.memory.getNickname()
     const responseStyle = this.memory.getResponseStyle()
@@ -236,8 +251,7 @@ Gently suggest PRO when user tries premium features.`
         const result = await this.addExpense(pending, expenseData)
 
         if (result.success) {
-          const descLabel = result.parsed?.description ? ` (${result.parsed.description})` : ''
-          const categoryLabel = result.parsed?.categoryName ? ` under ${result.parsed.categoryName}` : ''
+          const { descLabel, categoryLabel } = this.buildExpenseLabel(result.parsed)
           if (this.tools.reload_expenses) {
             await this.tools.reload_expenses()
           }
@@ -272,8 +286,7 @@ Gently suggest PRO when user tries premium features.`
       const result = await this.addExpense(aiParsed, expenseData)
 
       if (result.success) {
-        const descLabel = result.parsed?.description ? ` (${result.parsed.description})` : ''
-        const categoryLabel = result.parsed?.categoryName ? ` under ${result.parsed.categoryName}` : ''
+        const { descLabel, categoryLabel } = this.buildExpenseLabel(result.parsed)
         if (this.tools.reload_expenses) {
           await this.tools.reload_expenses()
         }
@@ -289,13 +302,11 @@ Gently suggest PRO when user tries premium features.`
         }
       } else {
         console.log('⚠️ Add attempt failed:', result.error)
-        // Fall through to regex fallback
         const parsed = ExpenseService.parseCommand(userMessage)
         if (parsed) {
           const fallbackResult = await this.addExpense(parsed, expenseData)
           if (fallbackResult.success) {
-            const descLabel = fallbackResult.parsed?.description ? ` (${fallbackResult.parsed.description})` : ''
-            const categoryLabel = fallbackResult.parsed?.categoryName ? ` under ${fallbackResult.parsed.categoryName}` : ''
+            const { descLabel, categoryLabel } = this.buildExpenseLabel(fallbackResult.parsed)
             if (this.tools.reload_expenses) {
               await this.tools.reload_expenses()
             }
@@ -309,7 +320,6 @@ Gently suggest PRO when user tries premium features.`
     }
 
     if (aiParsed && aiParsed.intent === 'suggest' && aiParsed.amount && aiParsed.merchant) {
-      // Conversational mention of spending — offer to add
       console.log('💬 SUGGEST intent detected:', aiParsed)
 
       const categories = expenseData?.categories || []
@@ -323,7 +333,6 @@ Gently suggest PRO when user tries premium features.`
 
       const categoryName = resolved?.name || 'Miscellaneous'
 
-      // Store pending expense for confirmation
       this.pendingExpense = {
         amount: aiParsed.amount,
         merchant: aiParsed.merchant,
@@ -331,10 +340,14 @@ Gently suggest PRO when user tries premium features.`
         dateHint: aiParsed.dateHint
       }
 
-      const descLabel = aiParsed.description ? ` for ${aiParsed.description}` : ''
+      const merchantLower = aiParsed.merchant?.toLowerCase().replace(/[^a-z0-9]/g, '') || ''
+      const descLower = aiParsed.description?.toLowerCase().replace(/[^a-z0-9]/g, '') || ''
+      const isDuplicate = !aiParsed.description || merchantLower === descLower || merchantLower.includes(descLower) || descLower.includes(merchantLower)
+      const descLabel = isDuplicate ? '' : ` for ${aiParsed.description}`
+
       return {
         handled: true,
-        response: `That's a big one! $${aiParsed.amount} at ${aiParsed.merchant}${descLabel}. Want me to add that to your expenses under ${categoryName}?`
+        response: `That's a big one! $${aiParsed.amount} for ${aiParsed.merchant}${descLabel}. Want me to add that to your expenses under ${categoryName}?`
       }
     }
 
