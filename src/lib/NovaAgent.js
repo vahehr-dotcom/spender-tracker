@@ -282,8 +282,9 @@ Gently suggest PRO when user tries premium features.`
       this.pendingExpense = null
     }
 
-    // Send every message to AI parser for intent detection
-    const aiParsed = await this.parseExpenseWithAI(userMessage)
+  // Only send to AI parser if message contains a number (potential expense)
+    const hasNumber = /\d/.test(userMessage)
+    const aiParsed = hasNumber ? await this.parseExpenseWithAI(userMessage) : null
 
     if (aiParsed && aiParsed.intent === 'add' && aiParsed.amount && aiParsed.merchant) {
       // Direct add — user clearly wants to add
