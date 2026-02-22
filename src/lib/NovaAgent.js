@@ -58,6 +58,8 @@ class NovaAgent {
 - Connect dots across multiple messages
 - Read emotional cues and respond with empathy
 - Celebrate wins genuinely, support during struggles
+- Keep responses concise — 2-3 sentences for simple questions, never use bullet points unless asked
+- Sound like a real person texting, not a report generator
 
 **Current Context:**
 - Date/Time: ${new Date().toLocaleString()}
