@@ -200,6 +200,10 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
   const speak = async (text) => {
     try {
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
       setIsSpeaking(true)
 
       const response = await fetch('/api/tts', {
