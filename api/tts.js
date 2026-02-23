@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', true)
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT')
@@ -28,7 +27,7 @@ export default async function handler(req, res) {
         Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`
       },
       body: JSON.stringify({
-        model: 'tts-1',
+        model: 'tts-1-hd',
         voice,
         input: text,
         speed
@@ -41,7 +40,6 @@ export default async function handler(req, res) {
       return res.status(response.status).json({ error: 'TTS request failed', details: errorData })
     }
 
-    // Get the audio as array buffer and send as binary
     const audioBuffer = await response.arrayBuffer()
     
     res.setHeader('Content-Type', 'audio/mpeg')
