@@ -122,13 +122,13 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     const displayName = userProfile.first_name || userProfile.nickname || null
     const title = userProfile.title || null
 
-    let greeting
+   let greeting
     if (displayName && title) {
-      greeting = `Hello ${displayName}, ${title}!`
+      greeting = `Hey ${displayName}, ${title}! Good to see you.`
     } else if (displayName) {
-      greeting = `Hello ${displayName}!`
+      greeting = `Hey ${displayName}! Good to see you.`
     } else {
-      greeting = 'Hello!'
+      greeting = `Hey there! Good to see you.`
     }
 
     console.log('👋 Greeting:', greeting)
