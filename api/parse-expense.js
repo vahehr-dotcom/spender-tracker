@@ -34,15 +34,17 @@ Intent rules:
 Parsing rules (for "add" and "suggest" intents):
 - amount: the dollar amount mentioned
 - merchant: the store, business, or service provider name. If no specific merchant is named, create a short descriptive merchant like "AC Repair", "Car Service", "Home Plumber". Never use generic words like "Car" or "House" alone.
-- description: what was bought or what the expense was for. Null if not clear.
+- description: additional detail ONLY if it adds new information beyond the merchant name. If the merchant already captures what the expense is for, set description to null. Do NOT repeat or rephrase the merchant as the description.
 - dateHint: "today" unless they mention yesterday or X days ago
 
 Examples:
 "add $6 coffee starbucks" → {"intent":"add","amount":6,"merchant":"Starbucks","description":"coffee","dateHint":"today"}
 "spent $32 at circle k on lotto tickets" → {"intent":"add","amount":32,"merchant":"Circle K","description":"lotto tickets","dateHint":"today"}
-"i ended up spending $2500 on my home AC unit repair" → {"intent":"suggest","amount":2500,"merchant":"AC Repair","description":"home AC unit repair","dateHint":"today"}
+"i ended up spending $2500 on my home AC unit repair" → {"intent":"suggest","amount":2500,"merchant":"AC Repair","description":null,"dateHint":"today"}
 "my car set me back $800 at the mechanic" → {"intent":"suggest","amount":800,"merchant":"Mechanic","description":"car repair","dateHint":"today"}
 "just dropped $300 at nordstrom" → {"intent":"suggest","amount":300,"merchant":"Nordstrom","description":null,"dateHint":"today"}
+"spent $2900 on a san diego trip" → {"intent":"suggest","amount":2900,"merchant":"San Diego Trip","description":null,"dateHint":"today"}
+"bought groceries and a new jacket at costco for $180" → {"intent":"add","amount":180,"merchant":"Costco","description":"groceries and jacket","dateHint":"today"}
 "how am i doing this month?" → {"intent":"none","amount":null,"merchant":null,"description":null,"dateHint":"today"}
 "what's my biggest expense?" → {"intent":"none","amount":null,"merchant":null,"description":null,"dateHint":"today"}`
           },
