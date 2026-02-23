@@ -122,7 +122,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     const displayName = userProfile.first_name || userProfile.nickname || null
     const title = userProfile.title || null
 
-   let greeting
+    let greeting
     if (displayName && title) {
       greeting = `Hey ${displayName}, ${title}! Good to see you.`
     } else if (displayName) {
@@ -132,7 +132,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     }
 
     console.log('👋 Greeting:', greeting)
-    setTimeout(() => speak(greeting), 500)
+    setTimeout(() => speak(greeting, 0.85), 500)
 
   }, [userId, userProfile, isInitialized, hasGreeted, voiceGreetingEnabled])
 
@@ -198,7 +198,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     }
   }
 
-  const speak = async (text) => {
+  const speak = async (text, speed) => {
     try {
       if (audioRef.current) {
         audioRef.current.pause()
@@ -211,7 +211,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       const response = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: cleanText, voice: 'nova', speed: 0.95 })
+        body: JSON.stringify({ text: cleanText, voice: 'nova', speed: speed || 0.95 })
       })
 
       const audioBlob = await response.blob()
