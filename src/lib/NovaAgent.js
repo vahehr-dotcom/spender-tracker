@@ -357,7 +357,54 @@ Gently suggest PRO when user tries premium features.`
         response: `That's a big one! $${aiParsed.amount} for ${aiParsed.merchant}${descLabel}. Want me to add that to your expenses under ${categoryName}?`
       }
     }
+// BUDGET detection
+    const isBudgetIntent = /\b(budget|limit|goal|cap|target)\b/.test(lower)
+    if (isBudgetIntent && this.isProMode) {
+      const setMatch = lower.match(/(?:set|make|change|update)\s+(?:my\s+)?(.+?)\s+(?:budget|limit|goal|cap|target)\s+(?:to|at|for|as)\s+\$?(\d+(?:\.\d{2})?)/)
+        || lower.match(/(?:budget|limit|goal|cap|target)\s+(?:for|on)\s+(.+?)\s+(?:to|at|is|should be)\s+\$?(\d+(?:\.\d{2})?)/)
+        || lower.match(/\$(\d+(?:\.\d{2})?)\s+(?:budget|limit|goal|cap|target)\s+(?:for|on)\s+(.+)/)
 
+      if (setMatch) {
+        let category, amount
+        if (/^\d/.test(setMatch[1])) {
+          amount = parseFloat(setMatch[1])
+          category = setMatch[2].trim()
+        } else {
+          category = setMatch[1].trim()
+          amount = parseFloat(setMatch[2])
+        }
+
+        // Fuzzy match category name against available categories
+        const categories = expenseData?.categories || []
+        const match = categories.find(c => c.name.toLowerCase() === category.toLowerCase())
+          || categories.find(c => c.name.toLowerCase().includes(category.toLowerCase()))
+          || categories.find(c => category.toLowerCase().includes(c.name.toLowerCase()))
+
+        if (match) {
+          const result = await SpendingInsights.setBudgetGoal(this.memory.userId, match.name, amount)
+          if (result.success) {
+            return { handled: true, response: `✅ Got it! ${match.name} budget set to $${amount}/month.` }
+          }
+        } else {
+          return { handled: true, response: `I couldn't find a category matching "${category}". Try the exact category name.` }
+        }
+      }
+
+      const removeMatch = lower.match(/(?:remove|delete|clear)\s+(?:my\s+)?(.+?)\s+(?:budget|limit|goal)/)
+      if (removeMatch) {
+        const category = removeMatch[1].trim()
+        const categories = expenseData?.categories || []
+        const match = categories.find(c => c.name.toLowerCase() === category.toLowerCase())
+          || categories.find(c => c.name.toLowerCase().includes(category.toLowerCase()))
+
+        if (match) {
+          await SpendingInsights.removeBudgetGoal(this.memory.userId, match.name)
+          return { handled: true, response: `✅ Removed your ${match.name} budget goal.` }
+        }
+      }
+
+      // If just asking about budgets, let it fall through to chat — Nova has the data in her system prompt
+    }
     // UPDATE detection
     if (lower.includes('update') || lower.includes('change') || lower.includes('edit') || lower.includes('correct')) {
       return await this.handleUpdate(userMessage, expenseData)
