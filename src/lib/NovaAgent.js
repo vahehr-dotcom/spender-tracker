@@ -284,7 +284,7 @@ Gently suggest PRO when user tries premium features.`
       this.pendingExpense = null
     }
 
-  // Only send to AI parser if message contains a number (potential expense)
+    // Only send to AI parser if message contains a number (potential expense)
     const hasNumber = /\d/.test(userMessage)
     const aiParsed = hasNumber ? await this.parseExpenseWithAI(userMessage) : null
 
@@ -351,13 +351,15 @@ Gently suggest PRO when user tries premium features.`
 
       const isDuplicate = !aiParsed.description || this.isSimilar(aiParsed.merchant, aiParsed.description)
       const descLabel = isDuplicate ? '' : ` for ${aiParsed.description}`
+      const reaction = aiParsed.amount >= 500 ? `That's a big one! ` : ''
 
       return {
         handled: true,
-        response: `That's a big one! $${aiParsed.amount} for ${aiParsed.merchant}${descLabel}. Want me to add that to your expenses under ${categoryName}?`
+        response: `${reaction}$${aiParsed.amount} for ${aiParsed.merchant}${descLabel}. Want me to add that to your expenses under ${categoryName}?`
       }
     }
-// BUDGET detection
+
+    // BUDGET detection
     const isBudgetIntent = /\b(budget|limit|goal|cap|target)\b/.test(lower)
     if (isBudgetIntent && this.isProMode) {
       const setMatch = lower.match(/(?:set|make|change|update)\s+(?:my\s+)?(.+?)\s+(?:budget|limit|goal|cap|target)\s+(?:to|at|for|as)\s+\$?(\d+(?:\.\d{2})?)/)
@@ -405,6 +407,7 @@ Gently suggest PRO when user tries premium features.`
 
       // If just asking about budgets, let it fall through to chat — Nova has the data in her system prompt
     }
+
     // UPDATE detection
     if (lower.includes('update') || lower.includes('change') || lower.includes('edit') || lower.includes('correct')) {
       return await this.handleUpdate(userMessage, expenseData)
