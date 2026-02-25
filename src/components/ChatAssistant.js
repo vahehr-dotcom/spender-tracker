@@ -199,12 +199,8 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
     }
   }
 
-  const speak = async (text, speed) => {
+  const speak = async (text) => {
     try {
-      if (audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current = null
-      }
       setIsSpeaking(true)
 
       const cleanText = text.replace(/[*#_~`>]/g, '').replace(/\n{2,}/g, '. ').replace(/\n/g, '. ').trim()
@@ -212,7 +208,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       const response = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: cleanText, voice: 'nova', speed: speed || 0.95 })
+        body: JSON.stringify({ text: cleanText, voice: 'nova', speed: 0.95 })
       })
 
       const audioBlob = await response.blob()
