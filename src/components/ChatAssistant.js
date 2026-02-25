@@ -133,6 +133,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
     console.log('👋 Greeting:', greeting)
     setLastResponse(greeting)
+    setTimeout(() => speak(greeting, 0.85), 500)
 
   }, [userId, userProfile, isInitialized, hasGreeted, voiceGreetingEnabled])
 
