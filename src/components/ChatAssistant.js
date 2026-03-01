@@ -322,7 +322,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
         if (agentResult.handled) {
           response = agentResult.response
 
-          if (agentResult.action === 'add') {
+          if (response.startsWith('✅ Added') || response.startsWith('✅ Done! Added')) {
             await subscriptionManager.incrementUsage(userId, 'ai_parse_count')
           }
         } else {
