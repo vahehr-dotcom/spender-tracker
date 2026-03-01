@@ -77,7 +77,7 @@ class CategoryResolver {
         .select('category_name')
         .eq('user_id', userId)
         .eq('merchant_name', merchantKey)
-        .single()
+        .maybeSingle()
       if (error || !data) return null
       return data.category_name
     } catch {
@@ -94,7 +94,7 @@ class CategoryResolver {
         .from('merchant_resolutions')
         .select('category_name, confidence')
         .eq('merchant_name', merchantKey)
-        .single()
+        .maybeSingle()
       if (error || !data) return null
       return data
     } catch {
@@ -108,7 +108,7 @@ class CategoryResolver {
         .from('merchant_resolutions')
         .select('id, resolution_count, confidence')
         .eq('merchant_name', merchantKey)
-        .single()
+        .maybeSingle()
 
       if (existing) {
         // Weighted average confidence, increment count
