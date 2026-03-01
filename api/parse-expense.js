@@ -27,8 +27,8 @@ Return this exact structure:
 {"intent": "add|suggest|none", "amount": number or null, "merchant": "string or null", "description": "string or null", "dateHint": "today|yesterday|X days ago"}
 
 Intent rules:
-- "add": User is clearly commanding to add an expense. Keywords like "add", "log", "track", "record" plus an amount. Example: "add $50 at Target", "log $200 groceries at Costco"
-- "suggest": User is talking conversationally but mentions spending money. They didn't ask to add it, but there's a clear amount and what it was for. Example: "i ended up spending $2500 on my AC repair", "my car cost me $800 to fix", "just dropped $300 at Nordstrom", "dinner set me back $120"
+- "add": User is stating they spent money OR commanding to add an expense. Keywords like "add", "log", "track", "record", "spent", "paid", "bought", "got", "picked up" plus an amount AND a specific merchant or store name. Example: "add $50 at Target", "spent $12 at Subway on lunch", "paid $80 at Costco for groceries", "bought $30 worth of gas at Shell"
+- "suggest": User mentions spending money conversationally WITHOUT a specific named merchant/store. They describe what happened but the merchant is vague or unnamed. Example: "i ended up spending $2500 on my AC repair", "my car cost me $800 to fix", "dinner set me back $120", "just dropped $300 on clothes"
 - "none": No expense information at all. Example: "how am i doing this month?", "what did i spend on food?", "hello", "thanks nova"
 
 Parsing rules (for "add" and "suggest" intents):
@@ -42,11 +42,15 @@ CRITICAL: Never hallucinate or fabricate information. Only extract what the user
 Examples:
 "add $6 coffee starbucks" → {"intent":"add","amount":6,"merchant":"Starbucks","description":"coffee","dateHint":"today"}
 "spent $32 at circle k on lotto tickets" → {"intent":"add","amount":32,"merchant":"Circle K","description":"lotto tickets","dateHint":"today"}
+"spent $12 at subway on lunch" → {"intent":"add","amount":12,"merchant":"Subway","description":"lunch","dateHint":"today"}
+"paid $5 to craigslist for a car ad" → {"intent":"add","amount":5,"merchant":"Craigslist","description":"car ad","dateHint":"today"}
+"bought groceries and a new jacket at costco for $180" → {"intent":"add","amount":180,"merchant":"Costco","description":"groceries and jacket","dateHint":"today"}
 "i ended up spending $2500 on my home AC unit repair" → {"intent":"suggest","amount":2500,"merchant":"AC Repair","description":null,"dateHint":"today"}
 "i went out to lunch and spent $45" → {"intent":"suggest","amount":45,"merchant":"Lunch","description":null,"dateHint":"today"}
 "spent $2900 on a san diego trip" → {"intent":"suggest","amount":2900,"merchant":"San Diego Trip","description":null,"dateHint":"today"}
-"bought groceries and a new jacket at costco for $180" → {"intent":"add","amount":180,"merchant":"Costco","description":"groceries and jacket","dateHint":"today"}
-"just dropped $300 at nordstrom" → {"intent":"suggest","amount":300,"merchant":"Nordstrom","description":null,"dateHint":"today"}
+"just dropped $300 at nordstrom" → {"intent":"add","amount":300,"merchant":"Nordstrom","description":null,"dateHint":"today"}
+"my car cost me $800 to fix" → {"intent":"suggest","amount":800,"merchant":"Car Repair","description":null,"dateHint":"today"}
+"dinner set me back $120" → {"intent":"suggest","amount":120,"merchant":"Dinner","description":null,"dateHint":"today"}
 "how am i doing this month?" → {"intent":"none","amount":null,"merchant":null,"description":null,"dateHint":"today"}`
           },
           { role: 'user', content: message }
