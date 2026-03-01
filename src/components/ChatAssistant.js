@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import MemoryManager from '../lib/MemoryManager'
 import NovaAgent from '../lib/NovaAgent'
+import subscriptionManager from '../lib/SubscriptionManager'
 
 let greetedUserId = null
 
@@ -201,6 +202,12 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
   const speak = async (text) => {
     try {
+      const ttsCheck = await subscriptionManager.canUse(userId, 'tts')
+      if (!ttsCheck.allowed) {
+        setLastResponse(`You've reached your daily voice limit (${ttsCheck.limit}). Upgrade for more!`)
+        return
+      }
+
       setIsSpeaking(true)
 
       const cleanText = text.replace(/[*#_~`>]/g, '').replace(/\n{2,}/g, '. ').replace(/\n/g, '. ').trim()
@@ -225,6 +232,7 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       }
 
       await audioRef.current.play()
+      await subscriptionManager.incrementUsage(userId, 'tts_count')
     } catch (err) {
       console.error('TTS error:', err)
       setIsSpeaking(false)
@@ -282,6 +290,13 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
     const userMessage = overrideMessage || aiInput.trim()
     if (!userMessage) return
+
+    const msgCheck = await subscriptionManager.canUse(userId, 'message')
+    if (!msgCheck.allowed) {
+      setLastResponse(`You've reached your daily message limit (${msgCheck.limit}). Upgrade for more conversations with Nova!`)
+      return
+    }
+
     setAiInput('')
     setIsThinking(true)
     setLastUserMessage(userMessage)
@@ -290,6 +305,8 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
       if (!overrideMessage) {
         memoryRef.current.addMessage('user', userMessage)
       }
+
+      await subscriptionManager.incrementUsage(userId, 'message_count')
 
       let response = ''
 
@@ -304,6 +321,10 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
 
         if (agentResult.handled) {
           response = agentResult.response
+
+          if (agentResult.action === 'add') {
+            await subscriptionManager.incrementUsage(userId, 'ai_parse_count')
+          }
         } else {
           const systemPrompt = await agentRef.current.buildSystemPrompt(expenseData)
           const messages = agentRef.current.buildMessages(systemPrompt, userMessage)

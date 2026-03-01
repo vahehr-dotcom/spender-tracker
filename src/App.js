@@ -91,8 +91,7 @@ function MainApp() {
           await loadExpenses(session.user.id)
         }
 
-        const features = await subscriptionManager.getFeatures(session.user.id)
-        console.log('🎯 SubscriptionManager:', features.tier, features)
+      await subscriptionManager.getFeatures(session.user.id)
 
         startSession(session.user.id, session.user.email)
         logLogin(session.user.email)
