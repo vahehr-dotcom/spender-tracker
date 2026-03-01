@@ -17,6 +17,7 @@ import LoginHistoryPage from './pages/LoginHistoryPage'
 
 import { useAuth, useUserData, useExpenses } from './hooks'
 import ExpenseService from './lib/ExpenseService'
+import subscriptionManager from './lib/SubscriptionManager'
 
 const AnalyticsPage = () => {
   const navigate = useNavigate()
@@ -89,6 +90,9 @@ function MainApp() {
           await loadAllUserData(session.user.id, session.user.email)
           await loadExpenses(session.user.id)
         }
+
+        const features = await subscriptionManager.getFeatures(session.user.id)
+        console.log('🎯 SubscriptionManager:', features.tier, features)
 
         startSession(session.user.id, session.user.email)
         logLogin(session.user.email)
