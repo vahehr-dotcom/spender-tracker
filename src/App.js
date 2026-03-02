@@ -75,6 +75,7 @@ function MainApp() {
   const [searchTerm, setSearchTerm] = useState('')
   const [showArchived, setShowArchived] = useState(false)
   const [testMode, setTestMode] = useState(false)
+  const [userFeatures, setUserFeatures] = useState(null)
 
   const navigate = useNavigate()
 
@@ -91,7 +92,8 @@ function MainApp() {
           await loadExpenses(session.user.id)
         }
 
-      await subscriptionManager.getFeatures(session.user.id)
+        const features = await subscriptionManager.getFeatures(session.user.id)
+        setUserFeatures(features)
 
         startSession(session.user.id, session.user.email)
         logLogin(session.user.email)
@@ -126,7 +128,8 @@ function MainApp() {
     )
   })
 
-  const isProMode = !testMode && subscriptionStatus === 'pro'
+  const tier = userFeatures?.tier || 'free'
+  const isProMode = !testMode && (tier === 'pro' || tier === 'max' || tier === 'admin' || tier === 'tester' || tier === 'guest')
   const aiInsights = isProMode ? calculateAIInsights(allExpenses, categories) : null
 
   const handleSearch = () => {
@@ -327,6 +330,7 @@ function MainApp() {
             expenses={allExpenses}
             categories={categories}
             isProMode={isProMode}
+            userFeatures={userFeatures}
             onUpgradeToPro={() => setShowUpgrade(true)}
             onAICommand={handleAICommand}
             onReloadExpenses={handleReloadExpenses}
