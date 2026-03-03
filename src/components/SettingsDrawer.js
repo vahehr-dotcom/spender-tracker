@@ -1,30 +1,81 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
+import subscriptionManager from '../lib/SubscriptionManager'
 
-export default function SettingsDrawer({ isOpen, onClose, userProfile, userId, onProfileUpdate }) {
+export default function SettingsDrawer({ isOpen, onClose, userProfile, userId, userFeatures, onProfileUpdate }) {
   const [activeSection, setActiveSection] = useState('profile')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [gender, setGender] = useState('')
+  const [phone, setPhone] = useState('')
+  const [timezone, setTimezone] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveMessage, setSaveMessage] = useState('')
+
+  const [voiceGreeting, setVoiceGreeting] = useState(true)
+  const [responseStyle, setResponseStyle] = useState('concise')
+  const [savingPrefs, setSavingPrefs] = useState(false)
+  const [prefsMessage, setPrefsMessage] = useState('')
+
+  const [usageStats, setUsageStats] = useState(null)
+  const [trialInfo, setTrialInfo] = useState(null)
 
   useEffect(() => {
     if (userProfile) {
       setFirstName(userProfile.first_name || '')
       setLastName(userProfile.last_name || '')
       setGender(userProfile.gender || '')
+      setPhone(userProfile.phone || '')
+      setTimezone(userProfile.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || '')
     }
   }, [userProfile])
 
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden'
+      loadPreferences()
+      if (activeSection === 'subscription') loadSubscriptionData()
     } else {
       document.body.style.overflow = ''
     }
     return () => { document.body.style.overflow = '' }
   }, [isOpen])
+
+  useEffect(() => {
+    if (isOpen && activeSection === 'subscription') loadSubscriptionData()
+  }, [activeSection])
+
+  const loadPreferences = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('user_preferences')
+        .select('preference_type, preference_value')
+        .eq('user_id', userId)
+        .in('preference_type', ['voice_greeting', 'response_style'])
+
+      if (!error && data) {
+        data.forEach(pref => {
+          if (pref.preference_type === 'voice_greeting') setVoiceGreeting(pref.preference_value === 'true')
+          if (pref.preference_type === 'response_style') setResponseStyle(pref.preference_value || 'concise')
+        })
+      }
+    } catch (err) {
+      console.error('Load preferences error:', err)
+    }
+  }
+
+  const loadSubscriptionData = async () => {
+    try {
+      const [usage, trial] = await Promise.all([
+        subscriptionManager.getDailyUsage(userId),
+        subscriptionManager.getTrialInfo(userId)
+      ])
+      setUsageStats(usage)
+      setTrialInfo(trial)
+    } catch (err) {
+      console.error('Load subscription data error:', err)
+    }
+  }
 
   const handleSaveProfile = async () => {
     if (!firstName.trim() || !lastName.trim()) {
@@ -39,6 +90,8 @@ export default function SettingsDrawer({ isOpen, onClose, userProfile, userId, o
         first_name: firstName.trim(),
         last_name: lastName.trim(),
         gender: gender || null,
+        phone: phone.trim() || null,
+        timezone: timezone || null,
         updated_at: new Date().toISOString()
       }
 
@@ -61,6 +114,26 @@ export default function SettingsDrawer({ isOpen, onClose, userProfile, userId, o
     setSaving(false)
   }
 
+  const handleSavePreference = async (type, value) => {
+    setSavingPrefs(true)
+    setPrefsMessage('')
+    try {
+      await supabase.from('user_preferences').upsert({
+        user_id: userId,
+        preference_type: type,
+        preference_value: value.toString(),
+        set_at: new Date().toISOString()
+      }, { onConflict: 'user_id,preference_type' })
+
+      setPrefsMessage('Saved!')
+      setTimeout(() => setPrefsMessage(''), 2000)
+    } catch (err) {
+      console.error('Save preference error:', err)
+      setPrefsMessage('Failed to save')
+    }
+    setSavingPrefs(false)
+  }
+
   const genderOptions = [
     { value: 'male', label: '👨', sublabel: 'Male' },
     { value: 'female', label: '👩', sublabel: 'Female' },
@@ -68,11 +141,22 @@ export default function SettingsDrawer({ isOpen, onClose, userProfile, userId, o
   ]
 
   const sections = [
-    { id: 'profile', label: '👤 Profile', icon: '👤' },
-    { id: 'preferences', label: '⚙️ Preferences', icon: '⚙️' },
-    { id: 'subscription', label: '💳 Subscription', icon: '💳' },
-    { id: 'help', label: '❓ Help & Support', icon: '❓' }
+    { id: 'profile', label: '👤 Profile' },
+    { id: 'preferences', label: '⚙️ Preferences' },
+    { id: 'subscription', label: '💳 Subscription' },
+    { id: 'help', label: '❓ Help' }
   ]
+
+  const tier = userFeatures?.tier || 'free'
+  const tierDisplay = {
+    free: { label: 'Free', color: '#6b7280', bg: '#f3f4f6' },
+    pro: { label: 'PRO', color: '#ffffff', bg: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' },
+    max: { label: 'MAX', color: '#ffffff', bg: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' },
+    admin: { label: 'ADMIN', color: '#ffffff', bg: 'linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)' },
+    tester: { label: 'TESTER', color: '#ffffff', bg: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' },
+    guest: { label: 'GUEST', color: '#ffffff', bg: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)' }
+  }
+  const currentTier = tierDisplay[tier] || tierDisplay.free
 
   if (!isOpen) return null
 
@@ -266,6 +350,62 @@ export default function SettingsDrawer({ isOpen, onClose, userProfile, userId, o
                 />
               </div>
 
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: 600, color: '#374151' }}>
+                  Phone (optional)
+                </label>
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="(555) 123-4567"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '10px',
+                    fontSize: '14px',
+                    boxSizing: 'border-box',
+                    outline: 'none'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = '#667eea'}
+                  onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                />
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: 600, color: '#374151' }}>
+                  Timezone
+                </label>
+                <select
+                  value={timezone}
+                  onChange={(e) => setTimezone(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '10px',
+                    fontSize: '14px',
+                    boxSizing: 'border-box',
+                    outline: 'none',
+                    background: 'white'
+                  }}
+                >
+                  <option value="">Auto-detect</option>
+                  <option value="America/New_York">Eastern (ET)</option>
+                  <option value="America/Chicago">Central (CT)</option>
+                  <option value="America/Denver">Mountain (MT)</option>
+                  <option value="America/Los_Angeles">Pacific (PT)</option>
+                  <option value="America/Anchorage">Alaska (AKT)</option>
+                  <option value="Pacific/Honolulu">Hawaii (HT)</option>
+                  <option value="Europe/London">London (GMT)</option>
+                  <option value="Europe/Paris">Paris (CET)</option>
+                  <option value="Asia/Tokyo">Tokyo (JST)</option>
+                  <option value="Asia/Dubai">Dubai (GST)</option>
+                  <option value="Australia/Sydney">Sydney (AEST)</option>
+                </select>
+              </div>
+
               <div style={{ marginBottom: '24px' }}>
                 <label style={{ display: 'block', marginBottom: '10px', fontSize: '14px', fontWeight: 600, color: '#374151' }}>
                   I am
@@ -338,23 +478,293 @@ export default function SettingsDrawer({ isOpen, onClose, userProfile, userId, o
           )}
 
           {activeSection === 'preferences' && (
-            <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af' }}>
-              <p style={{ fontSize: '40px', marginBottom: '12px' }}>⚙️</p>
-              <p>Preferences coming soon</p>
+            <div>
+              <div style={{
+                padding: '16px',
+                background: '#f9fafb',
+                borderRadius: '12px',
+                marginBottom: '16px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <p style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: '#374151' }}>🔊 Voice Greeting</p>
+                    <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#9ca3af' }}>Nova greets you by voice when you open the app</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const newVal = !voiceGreeting
+                      setVoiceGreeting(newVal)
+                      handleSavePreference('voice_greeting', newVal)
+                    }}
+                    disabled={savingPrefs}
+                    style={{
+                      width: '52px',
+                      height: '28px',
+                      borderRadius: '14px',
+                      border: 'none',
+                      background: voiceGreeting ? '#10b981' : '#d1d5db',
+                      cursor: 'pointer',
+                      position: 'relative',
+                      transition: 'background 0.2s'
+                    }}
+                  >
+                    <div style={{
+                      width: '22px',
+                      height: '22px',
+                      borderRadius: '50%',
+                      background: 'white',
+                      position: 'absolute',
+                      top: '3px',
+                      left: voiceGreeting ? '27px' : '3px',
+                      transition: 'left 0.2s',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                    }} />
+                  </button>
+                </div>
+              </div>
+
+              <div style={{
+                padding: '16px',
+                background: '#f9fafb',
+                borderRadius: '12px',
+                marginBottom: '16px'
+              }}>
+                <p style={{ margin: '0 0 10px', fontSize: '15px', fontWeight: 600, color: '#374151' }}>💬 Nova Response Style</p>
+                <p style={{ margin: '0 0 12px', fontSize: '13px', color: '#9ca3af' }}>How detailed should Nova's responses be?</p>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {[
+                    { value: 'concise', label: 'Concise', desc: 'Short & sweet' },
+                    { value: 'balanced', label: 'Balanced', desc: 'Just right' },
+                    { value: 'detailed', label: 'Detailed', desc: 'In-depth' }
+                  ].map(option => (
+                    <button
+                      key={option.value}
+                      onClick={() => {
+                        setResponseStyle(option.value)
+                        handleSavePreference('response_style', option.value)
+                      }}
+                      disabled={savingPrefs}
+                      style={{
+                        flex: 1,
+                        padding: '12px 8px',
+                        borderRadius: '10px',
+                        border: responseStyle === option.value ? '2px solid #667eea' : '2px solid #e5e7eb',
+                        background: responseStyle === option.value ? '#eef2ff' : 'white',
+                        cursor: 'pointer',
+                        textAlign: 'center'
+                      }}
+                    >
+                      <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: responseStyle === option.value ? '#667eea' : '#374151' }}>
+                        {option.label}
+                      </p>
+                      <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#9ca3af' }}>{option.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {prefsMessage && (
+                <p style={{
+                  textAlign: 'center',
+                  fontSize: '14px',
+                  color: prefsMessage === 'Saved!' ? '#10b981' : '#ef4444',
+                  fontWeight: 600
+                }}>
+                  {prefsMessage}
+                </p>
+              )}
             </div>
           )}
 
           {activeSection === 'subscription' && (
-            <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af' }}>
-              <p style={{ fontSize: '40px', marginBottom: '12px' }}>💳</p>
-              <p>Subscription details coming soon</p>
+            <div>
+              <div style={{
+                padding: '20px',
+                background: currentTier.bg,
+                borderRadius: '16px',
+                marginBottom: '20px',
+                textAlign: 'center',
+                color: currentTier.color
+              }}>
+                <p style={{ margin: '0 0 4px', fontSize: '14px', opacity: 0.9 }}>Current Plan</p>
+                <p style={{ margin: 0, fontSize: '28px', fontWeight: 700 }}>{currentTier.label}</p>
+                {tier === 'guest' && userFeatures?.guest_granted_tier && (
+                  <p style={{ margin: '4px 0 0', fontSize: '13px', opacity: 0.9 }}>
+                    Access level: {userFeatures.guest_granted_tier.toUpperCase()}
+                  </p>
+                )}
+              </div>
+
+              {trialInfo && trialInfo.isInTrial && (
+                <div style={{
+                  padding: '14px',
+                  background: '#fffbeb',
+                  border: '1px solid #fbbf24',
+                  borderRadius: '12px',
+                  marginBottom: '16px',
+                  textAlign: 'center'
+                }}>
+                  <p style={{ margin: 0, fontSize: '14px', color: '#92400e', fontWeight: 600 }}>
+                    🎉 Trial Active — {trialInfo.daysLeft} day{trialInfo.daysLeft !== 1 ? 's' : ''} left
+                  </p>
+                </div>
+              )}
+
+              <div style={{
+                padding: '16px',
+                background: '#f9fafb',
+                borderRadius: '12px',
+                marginBottom: '16px'
+              }}>
+                <p style={{ margin: '0 0 12px', fontSize: '15px', fontWeight: 600, color: '#374151' }}>📊 Today's Usage</p>
+                {usageStats ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {[
+                      { label: 'Messages', used: usageStats.message_count, limit: userFeatures?.daily_messages },
+                      { label: 'Voice (TTS)', used: usageStats.tts_count, limit: userFeatures?.daily_tts },
+                      { label: 'AI Parses', used: usageStats.ai_parse_count, limit: userFeatures?.daily_ai_parses }
+                    ].map(stat => {
+                      const isUnlimited = stat.limit === Infinity || stat.limit === null
+                      const pct = isUnlimited ? 0 : Math.min(100, (stat.used / stat.limit) * 100)
+                      return (
+                        <div key={stat.label}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
+                            <span style={{ color: '#374151', fontWeight: 500 }}>{stat.label}</span>
+                            <span style={{ color: '#6b7280' }}>
+                              {stat.used} / {isUnlimited ? '∞' : stat.limit}
+                            </span>
+                          </div>
+                          <div style={{
+                            height: '6px',
+                            background: '#e5e7eb',
+                            borderRadius: '3px',
+                            overflow: 'hidden'
+                          }}>
+                            <div style={{
+                              height: '100%',
+                              width: isUnlimited ? '100%' : `${pct}%`,
+                              background: isUnlimited ? '#10b981' : pct > 80 ? '#ef4444' : pct > 50 ? '#f59e0b' : '#10b981',
+                              borderRadius: '3px',
+                              transition: 'width 0.3s'
+                            }} />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p style={{ margin: 0, fontSize: '13px', color: '#9ca3af' }}>Loading usage data...</p>
+                )}
+              </div>
+
+              <div style={{
+                padding: '16px',
+                background: '#f9fafb',
+                borderRadius: '12px',
+                marginBottom: '16px'
+              }}>
+                <p style={{ margin: '0 0 8px', fontSize: '15px', fontWeight: 600, color: '#374151' }}>✨ Your Features</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {[
+                    { label: 'Voice Commands', enabled: userFeatures?.voice_commands },
+                    { label: 'Nova Memory', enabled: userFeatures?.nova_memory },
+                    { label: 'Auto-Categorize', enabled: userFeatures?.auto_categorization },
+                    { label: 'Tags', enabled: userFeatures?.tags },
+                    { label: 'Receipt Scanning', enabled: userFeatures?.receipt_scanning },
+                    { label: 'Reports', enabled: userFeatures?.reports },
+                    { label: 'Export', enabled: userFeatures?.export },
+                    { label: 'Multi-Year', enabled: userFeatures?.multi_year },
+                    { label: 'Tax Prep', enabled: userFeatures?.tax_prep }
+                  ].map(feat => (
+                    <span
+                      key={feat.label}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '20px',
+                        fontSize: '12px',
+                        fontWeight: 500,
+                        background: feat.enabled ? '#ecfdf5' : '#f3f4f6',
+                        color: feat.enabled ? '#059669' : '#9ca3af',
+                        border: `1px solid ${feat.enabled ? '#a7f3d0' : '#e5e7eb'}`
+                      }}
+                    >
+                      {feat.enabled ? '✓' : '✗'} {feat.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {tier === 'free' && (
+                <button
+                  style={{
+                    width: '100%',
+                    padding: '14px',
+                    borderRadius: '10px',
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    color: 'white',
+                    fontSize: '16px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 14px rgba(102, 126, 234, 0.3)'
+                  }}
+                >
+                  Upgrade to PRO
+                </button>
+              )}
             </div>
           )}
 
           {activeSection === 'help' && (
-            <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af' }}>
-              <p style={{ fontSize: '40px', marginBottom: '12px' }}>❓</p>
-              <p>Help & Support coming soon</p>
+            <div>
+              <div style={{
+                padding: '16px',
+                background: '#f9fafb',
+                borderRadius: '12px',
+                marginBottom: '12px',
+                cursor: 'pointer'
+              }}
+                onClick={() => window.open('mailto:welcome.evtime@gmail.com?subject=Spender Tracker Support', '_blank')}
+              >
+                <p style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: '#374151' }}>📧 Contact Support</p>
+                <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#9ca3af' }}>Email us at welcome.evtime@gmail.com</p>
+              </div>
+
+              <div style={{
+                padding: '16px',
+                background: '#f9fafb',
+                borderRadius: '12px',
+                marginBottom: '12px'
+              }}>
+                <p style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: '#374151' }}>💡 Quick Tips</p>
+                <div style={{ marginTop: '10px', fontSize: '13px', color: '#6b7280', lineHeight: 1.6 }}>
+                  <p style={{ margin: '0 0 8px' }}>Tell Nova things like "spent $20 at Starbucks" and she'll add it automatically.</p>
+                  <p style={{ margin: '0 0 8px' }}>Say "set my dining budget to $300" to create budget goals.</p>
+                  <p style={{ margin: '0 0 8px' }}>Ask "how much did I spend this week?" for instant insights.</p>
+                  <p style={{ margin: 0 }}>Use the 🎤 button to talk to Nova hands-free (PRO).</p>
+                </div>
+              </div>
+
+              <div style={{
+                padding: '16px',
+                background: '#f9fafb',
+                borderRadius: '12px',
+                marginBottom: '12px'
+              }}>
+                <p style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: '#374151' }}>🐛 Report a Bug</p>
+                <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#9ca3af' }}>
+                  Found something broken? Email us with details and we'll fix it fast.
+                </p>
+              </div>
+
+              <div style={{
+                padding: '12px',
+                textAlign: 'center',
+                marginTop: '20px'
+              }}>
+                <p style={{ margin: 0, fontSize: '12px', color: '#d1d5db' }}>Spender Tracker v1.0</p>
+                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#d1d5db' }}>Made with 💜 by Nova Team</p>
+              </div>
             </div>
           )}
         </div>

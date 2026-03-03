@@ -549,11 +549,12 @@ function MainApp() {
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
 
-      <SettingsDrawer
+     <SettingsDrawer
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
         userProfile={userProfile}
         userId={session.user.id}
+        userFeatures={userFeatures}
         onProfileUpdate={handleProfileUpdate}
       />
     </div>
