@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
+import subscriptionManager from '../lib/SubscriptionManager'
 
 export default function AdminPanel({ onClose }) {
   const [users, setUsers] = useState([])
@@ -16,6 +17,8 @@ export default function AdminPanel({ onClose }) {
   const [adding, setAdding] = useState(false)
   const [sendingInvite, setSendingInvite] = useState(null)
 
+  const [guestDays, setGuestDays] = useState({})
+
   useEffect(() => {
     loadUsers()
     loadPendingUsers()
@@ -24,13 +27,33 @@ export default function AdminPanel({ onClose }) {
   const loadUsers = async () => {
     setLoading(true)
     try {
-      const { data, error } = await supabase
+      const { data: profiles, error: profileError } = await supabase
         .from('user_profiles')
-        .select('id, email, first_name, last_name, is_pro, role, created_at')
+        .select('id, email, first_name, last_name, is_pro, role, gender, created_at')
         .order('created_at', { ascending: false })
 
-      if (error) throw error
-      setUsers(data || [])
+      if (profileError) throw profileError
+
+      const { data: subscriptions, error: subError } = await supabase
+        .from('user_subscriptions')
+        .select('*')
+
+      if (subError) throw subError
+
+      const merged = (profiles || []).map(profile => {
+        const sub = (subscriptions || []).find(s => s.user_id === profile.id)
+        return {
+          ...profile,
+          tier: sub?.tier || 'free',
+          subscription_status: sub?.subscription_status || 'free',
+          trial_end: sub?.trial_end || null,
+          trial_used: sub?.trial_used || false,
+          subscription_expires_at: sub?.subscription_expires_at || null,
+          guest_granted_tier: sub?.guest_granted_tier || null
+        }
+      })
+
+      setUsers(merged)
     } catch (err) {
       console.error('Load users error:', err)
     }
@@ -51,26 +74,6 @@ export default function AdminPanel({ onClose }) {
     }
   }
 
-  const toggleProStatus = async (userId, currentStatus) => {
-    setUpdating(userId + '-pro')
-    try {
-      const { error } = await supabase
-        .from('user_profiles')
-        .update({ is_pro: !currentStatus })
-        .eq('id', userId)
-
-      if (error) throw error
-
-      setUsers(users.map(u => 
-        u.id === userId ? { ...u, is_pro: !currentStatus } : u
-      ))
-    } catch (err) {
-      console.error('Toggle PRO error:', err)
-      alert('Failed to update user status')
-    }
-    setUpdating(null)
-  }
-
   const changeRole = async (userId, newRole) => {
     setUpdating(userId + '-role')
     try {
@@ -87,6 +90,113 @@ export default function AdminPanel({ onClose }) {
     } catch (err) {
       console.error('Change role error:', err)
       alert('Failed to update user role')
+    }
+    setUpdating(null)
+  }
+
+  const changeTier = async (userId, newTier) => {
+    setUpdating(userId + '-tier')
+    try {
+      const { error } = await supabase
+        .from('user_subscriptions')
+        .update({ 
+          tier: newTier, 
+          subscription_status: newTier === 'free' ? 'free' : 'active',
+          guest_granted_tier: null,
+          subscription_expires_at: null
+        })
+        .eq('user_id', userId)
+
+      if (error) throw error
+
+      subscriptionManager.clearCache(userId)
+
+      setUsers(users.map(u => 
+        u.id === userId ? { 
+          ...u, 
+          tier: newTier, 
+          subscription_status: newTier === 'free' ? 'free' : 'active',
+          guest_granted_tier: null,
+          subscription_expires_at: null
+        } : u
+      ))
+    } catch (err) {
+      console.error('Change tier error:', err)
+      alert('Failed to update tier')
+    }
+    setUpdating(null)
+  }
+
+  const grantGuestAccess = async (userId, grantedTier, days) => {
+    if (!days || days < 1) {
+      alert('Please enter number of days')
+      return
+    }
+    setUpdating(userId + '-guest')
+    try {
+      const expiresAt = new Date()
+      expiresAt.setDate(expiresAt.getDate() + parseInt(days))
+
+      const { error } = await supabase
+        .from('user_subscriptions')
+        .update({
+          tier: 'guest',
+          subscription_status: 'active',
+          guest_granted_tier: grantedTier,
+          subscription_expires_at: expiresAt.toISOString()
+        })
+        .eq('user_id', userId)
+
+      if (error) throw error
+
+      subscriptionManager.clearCache(userId)
+
+      setUsers(users.map(u => 
+        u.id === userId ? { 
+          ...u, 
+          tier: 'guest', 
+          subscription_status: 'active',
+          guest_granted_tier: grantedTier,
+          subscription_expires_at: expiresAt.toISOString()
+        } : u
+      ))
+    } catch (err) {
+      console.error('Grant guest error:', err)
+      alert('Failed to grant guest access')
+    }
+    setUpdating(null)
+  }
+
+  const revokeAccess = async (userId) => {
+    if (!window.confirm('Revoke this user\'s access and set to free tier?')) return
+    setUpdating(userId + '-revoke')
+    try {
+      const { error } = await supabase
+        .from('user_subscriptions')
+        .update({
+          tier: 'free',
+          subscription_status: 'free',
+          guest_granted_tier: null,
+          subscription_expires_at: null
+        })
+        .eq('user_id', userId)
+
+      if (error) throw error
+
+      subscriptionManager.clearCache(userId)
+
+      setUsers(users.map(u => 
+        u.id === userId ? { 
+          ...u, 
+          tier: 'free', 
+          subscription_status: 'free',
+          guest_granted_tier: null,
+          subscription_expires_at: null
+        } : u
+      ))
+    } catch (err) {
+      console.error('Revoke access error:', err)
+      alert('Failed to revoke access')
     }
     setUpdating(null)
   }
@@ -211,6 +321,47 @@ export default function AdminPanel({ onClose }) {
     return user.email?.toLowerCase().includes(searchTerm.toLowerCase())
   })
 
+  const getTierBadge = (user) => {
+    const tier = user.tier || 'free'
+    switch (tier) {
+      case 'admin':
+        return { bg: 'linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)', label: '👑 Admin' }
+      case 'tester':
+        return { bg: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', label: '🧪 Tester' }
+      case 'max':
+        return { bg: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', label: '⭐ MAX' }
+      case 'pro':
+        return { bg: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', label: '✓ PRO' }
+      case 'guest':
+        return { bg: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)', label: `🎟️ Guest (${user.guest_granted_tier?.toUpperCase() || 'PRO'})` }
+      default:
+        return { bg: '#e5e7eb', label: 'Free', textColor: '#6b7280' }
+    }
+  }
+
+  const getTrialInfo = (user) => {
+    if (!user.trial_end) return null
+    const trialEnd = new Date(user.trial_end)
+    const now = new Date()
+    if (user.trial_used) return { status: 'used', label: 'Trial used' }
+    if (trialEnd > now) {
+      const daysLeft = Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24))
+      return { status: 'active', label: `Trial: ${daysLeft}d left` }
+    }
+    return { status: 'expired', label: 'Trial expired' }
+  }
+
+  const getExpirationInfo = (user) => {
+    if (!user.subscription_expires_at) return null
+    const expires = new Date(user.subscription_expires_at)
+    const now = new Date()
+    if (expires > now) {
+      const daysLeft = Math.ceil((expires - now) / (1000 * 60 * 60 * 24))
+      return `Expires in ${daysLeft}d`
+    }
+    return 'Expired'
+  }
+
   const getRoleBadge = (role) => {
     switch (role) {
       case 'admin':
@@ -298,6 +449,20 @@ export default function AdminPanel({ onClose }) {
             👥 Active Users ({users.length})
           </button>
           <button
+            onClick={() => setActiveTab('subscriptions')}
+            style={{
+              padding: '10px 20px',
+              background: activeTab === 'subscriptions' ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#e5e7eb',
+              color: activeTab === 'subscriptions' ? 'white' : '#6b7280',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            💳 Subscriptions
+          </button>
+          <button
             onClick={() => setActiveTab('pending')}
             style={{
               padding: '10px 20px',
@@ -351,17 +516,23 @@ export default function AdminPanel({ onClose }) {
                     <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>User</th>
                     <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Email</th>
                     <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Role</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>PRO Status</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Tier</th>
                     <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredUsers.map(user => {
                     const roleBadge = getRoleBadge(user.role)
+                    const tierBadge = getTierBadge(user)
                     return (
                       <tr key={user.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
                         <td style={{ padding: '12px 16px' }}>
                           <strong>{user.first_name} {user.last_name}</strong>
+                          {user.gender && (
+                            <span style={{ fontSize: '11px', color: '#9ca3af', marginLeft: '6px' }}>
+                              ({user.gender})
+                            </span>
+                          )}
                         </td>
                         <td style={{ padding: '12px 16px', color: '#6b7280' }}>
                           {user.email}
@@ -379,75 +550,220 @@ export default function AdminPanel({ onClose }) {
                           </span>
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          {user.is_pro ? (
-                            <span style={{
-                              padding: '4px 12px',
-                              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                              color: 'white',
-                              borderRadius: '20px',
-                              fontSize: '12px',
-                              fontWeight: 'bold'
-                            }}>
-                              ✓ PRO
-                            </span>
-                          ) : (
-                            <span style={{
-                              padding: '4px 12px',
-                              background: '#e5e7eb',
-                              color: '#6b7280',
-                              borderRadius: '20px',
-                              fontSize: '12px',
-                              fontWeight: 'bold'
-                            }}>
-                              Basic
-                            </span>
-                          )}
+                          <span style={{
+                            padding: '4px 12px',
+                            background: tierBadge.bg,
+                            color: tierBadge.textColor || 'white',
+                            borderRadius: '20px',
+                            fontSize: '12px',
+                            fontWeight: 'bold'
+                          }}>
+                            {tierBadge.label}
+                          </span>
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
-                            <select
-                              value={user.role || 'user'}
-                              onChange={(e) => changeRole(user.id, e.target.value)}
-                              disabled={updating === user.id + '-role'}
+                          <select
+                            value={user.role || 'user'}
+                            onChange={(e) => changeRole(user.id, e.target.value)}
+                            disabled={updating === user.id + '-role'}
+                            style={{
+                              padding: '6px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid #d1d5db',
+                              fontSize: '13px',
+                              cursor: 'pointer',
+                              background: 'white'
+                            }}
+                          >
+                            <option value="user">User</option>
+                            <option value="tester">Tester</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'subscriptions' && (
+          <div style={{
+            flex: 1,
+            overflowY: 'auto',
+            border: '1px solid #e5e7eb',
+            borderRadius: '8px'
+          }}>
+            {loading ? (
+              <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
+                Loading...
+              </div>
+            ) : filteredUsers.length === 0 ? (
+              <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
+                No users found
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#f3f4f6' }}>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>User</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Current Tier</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Status</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Change Tier</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Guest Access</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredUsers.map(user => {
+                    const tierBadge = getTierBadge(user)
+                    const trialInfo = getTrialInfo(user)
+                    const expirationInfo = getExpirationInfo(user)
+                    return (
+                      <tr key={user.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <td style={{ padding: '12px 16px' }}>
+                          <strong>{user.first_name} {user.last_name}</strong>
+                          <div style={{ fontSize: '12px', color: '#9ca3af' }}>{user.email}</div>
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                          <span style={{
+                            padding: '4px 12px',
+                            background: tierBadge.bg,
+                            color: tierBadge.textColor || 'white',
+                            borderRadius: '20px',
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                            display: 'inline-block'
+                          }}>
+                            {tierBadge.label}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                          <div style={{ fontSize: '12px' }}>
+                            <span style={{
+                              color: user.subscription_status === 'active' ? '#10b981' 
+                                : user.subscription_status === 'trial' ? '#f59e0b' 
+                                : '#6b7280'
+                            }}>
+                              {user.subscription_status || 'free'}
+                            </span>
+                            {trialInfo && (
+                              <div style={{
+                                fontSize: '11px',
+                                color: trialInfo.status === 'active' ? '#f59e0b' 
+                                  : trialInfo.status === 'expired' ? '#ef4444' 
+                                  : '#9ca3af',
+                                marginTop: '2px'
+                              }}>
+                                {trialInfo.label}
+                              </div>
+                            )}
+                            {expirationInfo && (
+                              <div style={{
+                                fontSize: '11px',
+                                color: expirationInfo === 'Expired' ? '#ef4444' : '#8b5cf6',
+                                marginTop: '2px'
+                              }}>
+                                {expirationInfo}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                          <select
+                            value={user.tier || 'free'}
+                            onChange={(e) => changeTier(user.id, e.target.value)}
+                            disabled={updating === user.id + '-tier'}
+                            style={{
+                              padding: '6px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid #d1d5db',
+                              fontSize: '13px',
+                              cursor: 'pointer',
+                              background: 'white'
+                            }}
+                          >
+                            <option value="free">Free</option>
+                            <option value="pro">PRO</option>
+                            <option value="max">MAX</option>
+                            <option value="tester">Tester</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                          <div style={{ display: 'flex', gap: '4px', alignItems: 'center', justifyContent: 'center' }}>
+                            <input
+                              type="number"
+                              min="1"
+                              max="365"
+                              placeholder="Days"
+                              value={guestDays[user.id] || ''}
+                              onChange={(e) => setGuestDays({ ...guestDays, [user.id]: e.target.value })}
                               style={{
-                                padding: '6px 10px',
+                                width: '60px',
+                                padding: '6px',
                                 borderRadius: '6px',
                                 border: '1px solid #d1d5db',
-                                fontSize: '13px',
-                                cursor: 'pointer',
-                                background: 'white'
+                                fontSize: '12px',
+                                textAlign: 'center'
+                              }}
+                            />
+                            <button
+                              onClick={() => grantGuestAccess(user.id, 'pro', guestDays[user.id])}
+                              disabled={updating === user.id + '-guest' || !guestDays[user.id]}
+                              style={{
+                                padding: '6px 8px',
+                                background: !guestDays[user.id] ? '#e5e7eb' : 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
+                                color: !guestDays[user.id] ? '#9ca3af' : 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: !guestDays[user.id] ? 'not-allowed' : 'pointer',
+                                fontSize: '11px',
+                                fontWeight: 'bold'
                               }}
                             >
-                              <option value="user">User</option>
-                              <option value="tester">Tester</option>
-                              <option value="admin">Admin</option>
-                            </select>
-                            
+                              PRO
+                            </button>
                             <button
-                              onClick={() => toggleProStatus(user.id, user.is_pro)}
-                              disabled={updating === user.id + '-pro'}
+                              onClick={() => grantGuestAccess(user.id, 'max', guestDays[user.id])}
+                              disabled={updating === user.id + '-guest' || !guestDays[user.id]}
+                              style={{
+                                padding: '6px 8px',
+                                background: !guestDays[user.id] ? '#e5e7eb' : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                                color: !guestDays[user.id] ? '#9ca3af' : 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: !guestDays[user.id] ? 'not-allowed' : 'pointer',
+                                fontSize: '11px',
+                                fontWeight: 'bold'
+                              }}
+                            >
+                              MAX
+                            </button>
+                          </div>
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                          {user.tier !== 'free' && user.tier !== 'admin' && (
+                            <button
+                              onClick={() => revokeAccess(user.id)}
+                              disabled={updating === user.id + '-revoke'}
                               style={{
                                 padding: '6px 12px',
-                                background: user.is_pro 
-                                  ? '#ef4444' 
-                                  : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                background: '#ef4444',
                                 color: 'white',
                                 border: 'none',
                                 borderRadius: '6px',
-                                cursor: updating === user.id + '-pro' ? 'not-allowed' : 'pointer',
-                                fontWeight: 'bold',
+                                cursor: 'pointer',
                                 fontSize: '12px',
-                                opacity: updating === user.id + '-pro' ? 0.6 : 1,
-                                minWidth: '90px'
+                                fontWeight: 'bold',
+                                opacity: updating === user.id + '-revoke' ? 0.6 : 1
                               }}
                             >
-                              {updating === user.id + '-pro'
-                                ? '...' 
-                                : user.is_pro 
-                                  ? 'Revoke PRO' 
-                                  : 'Grant PRO'}
+                              Revoke
                             </button>
-                          </div>
+                          )}
                         </td>
                       </tr>
                     )
@@ -700,9 +1016,12 @@ export default function AdminPanel({ onClose }) {
           gap: '10px'
         }}>
           <span>Total users: {users.length}</span>
-          <span>PRO users: {users.filter(u => u.is_pro).length}</span>
-          <span>Testers: {users.filter(u => u.role === 'tester').length}</span>
-          <span>Admins: {users.filter(u => u.role === 'admin').length}</span>
+          <span>Free: {users.filter(u => u.tier === 'free').length}</span>
+          <span>PRO: {users.filter(u => u.tier === 'pro').length}</span>
+          <span>MAX: {users.filter(u => u.tier === 'max').length}</span>
+          <span>Guests: {users.filter(u => u.tier === 'guest').length}</span>
+          <span>Testers: {users.filter(u => u.tier === 'tester').length}</span>
+          <span>Admins: {users.filter(u => u.tier === 'admin').length}</span>
           <span>Pending: {pendingUsers.length}</span>
         </div>
       </div>

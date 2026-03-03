@@ -369,6 +369,11 @@ class SubscriptionManager {
     this._clearCache()
   }
 
+  clearCache() {
+    this.cache = null
+    this.cacheExpiry = 0
+  }
+
   _clearCache() {
     this.cache = null
     this.cacheExpiry = 0
