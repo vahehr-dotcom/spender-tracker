@@ -13,6 +13,7 @@ import ImportPreview from './components/ImportPreview'
 import UpgradeModal from './components/UpgradeModal'
 import AdminPanel from './components/AdminPanel'
 import AnalyticsDashboard from './components/AnalyticsDashboard'
+import SettingsDrawer from './components/SettingsDrawer'
 import LoginHistoryPage from './pages/LoginHistoryPage'
 
 import { useAuth, useUserData, useExpenses } from './hooks'
@@ -52,7 +53,8 @@ function MainApp() {
     checkOnboardingStatus,
     saveUserProfile,
     isAdmin,
-    isTester
+    isTester,
+    setUserProfile
   } = useUserData()
 
   const {
@@ -70,6 +72,7 @@ function MainApp() {
   const [showImport, setShowImport] = useState(false)
   const [showUpgrade, setShowUpgrade] = useState(false)
   const [showAdmin, setShowAdmin] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [parsedTransactions, setParsedTransactions] = useState([])
   const [searchInput, setSearchInput] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
@@ -114,6 +117,12 @@ function MainApp() {
     }
     
     return result
+  }
+
+  const handleProfileUpdate = (updatedProfile) => {
+    if (setUserProfile) {
+      setUserProfile(updatedProfile)
+    }
   }
 
   const allExpenses = showArchived ? expenses : expenses.filter(e => !e.archived)
@@ -295,6 +304,7 @@ function MainApp() {
             onLogout={handleLogout}
             onUpgrade={() => setShowUpgrade(true)}
             onOpenAdmin={() => setShowAdmin(true)}
+            onOpenSettings={() => setShowSettings(true)}
           />
 
           {!isProMode && (
@@ -538,6 +548,14 @@ function MainApp() {
 
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
+
+      <SettingsDrawer
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        userProfile={userProfile}
+        userId={session.user.id}
+        onProfileUpdate={handleProfileUpdate}
+      />
     </div>
   )
 }

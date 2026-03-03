@@ -244,6 +244,7 @@ export function useUserData() {
   return {
     userRole,
     userProfile,
+    setUserProfile,
     subscriptionStatus,
     categories,
     mainCategories,

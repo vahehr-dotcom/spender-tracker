@@ -12,7 +12,8 @@ export default function Header({
   onExport,
   onLogout,
   onUpgrade,
-  onOpenAdmin
+  onOpenAdmin,
+  onOpenSettings
 }) {
   const navigate = useNavigate()
 
@@ -28,6 +29,14 @@ export default function Header({
 
   const getTitle = () => {
     return userProfile?.title || null
+  }
+
+  const getAvatarContent = () => {
+    if (userProfile?.avatar_url) {
+      return <img src={userProfile.avatar_url} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+    }
+    const gender = userProfile?.gender
+    return gender === 'male' ? '👨' : gender === 'female' ? '👩' : '🧑'
   }
 
   return (
@@ -49,17 +58,42 @@ export default function Header({
         Nova Expense Tracker
       </h1>
 
-      <div style={{
-        padding: '12px 20px',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        borderRadius: '12px',
-        color: 'white',
-        fontWeight: 'bold',
-        fontSize: '16px',
-        textAlign: 'center'
-      }}>
-        Hello, {getDisplayName()}
-        {getTitle() && ` - ${getTitle()}`}
+      <div
+        onClick={onOpenSettings}
+        style={{
+          padding: '8px 20px 8px 8px',
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          borderRadius: '40px',
+          color: 'white',
+          fontWeight: 'bold',
+          fontSize: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          cursor: 'pointer',
+          transition: 'transform 0.2s, box-shadow 0.2s',
+          boxShadow: '0 2px 8px rgba(102, 126, 234, 0.3)'
+        }}
+        onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+        onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+      >
+        <div style={{
+          width: '36px',
+          height: '36px',
+          borderRadius: '50%',
+          background: 'rgba(255,255,255,0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '20px',
+          overflow: 'hidden'
+        }}>
+          {getAvatarContent()}
+        </div>
+        <span>
+          {getDisplayName()}
+          {getTitle() && ` - ${getTitle()}`}
+        </span>
       </div>
 
       <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
