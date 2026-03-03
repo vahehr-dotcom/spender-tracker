@@ -6,7 +6,7 @@ import subscriptionManager from '../lib/SubscriptionManager'
 
 let greetedUserId = null
 
-function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICommand, userId, userProfile, notifications = [], onDismissNotification, onReloadExpenses }) {
+function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgradeToPro, onAICommand, userId, userProfile, notifications = [], onDismissNotification, onReloadExpenses }) {
   const [aiInput, setAiInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
   const [isListening, setIsListening] = useState(false)
@@ -49,6 +49,12 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
   }, [isProMode])
 
   useEffect(() => {
+    if (agentRef.current && userProfile?.gender) {
+      agentRef.current.userGender = userProfile.gender
+    }
+  }, [userProfile])
+
+  useEffect(() => {
     if (!userId || initLockRef.current) return
     initLockRef.current = true
 
@@ -88,7 +94,8 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
         }
       }
 
-      agentRef.current = new NovaAgent(memoryRef.current, tools, true)
+      const userGender = userProfile?.gender || null
+      agentRef.current = new NovaAgent(memoryRef.current, tools, true, userGender)
 
       try {
         const { data, error } = await supabase
@@ -334,7 +341,11 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
             body: JSON.stringify({ messages })
           })
           const data = await apiResponse.json()
-          response = data.choices[0].message.content
+          if (data.choices && data.choices[0]) {
+            response = data.choices[0].message.content
+          } else {
+            response = '⚠️ Nova is having trouble connecting right now. Please try again in a moment.'
+          }
         }
       } else {
         const systemPrompt = `You are Nova, a friendly AI assistant for expense tracking. Be helpful and concise.${memoryRef.current.buildMemoryContext()}`
@@ -350,7 +361,11 @@ function ChatAssistant({ expenses, categories, isProMode, onUpgradeToPro, onAICo
           body: JSON.stringify({ messages: apiMessages })
         })
         const data = await apiResponse.json()
-        response = data.choices[0].message.content
+        if (data.choices && data.choices[0]) {
+          response = data.choices[0].message.content
+        } else {
+          response = '⚠️ Nova is having trouble connecting right now. Please try again in a moment.'
+        }
       }
 
       setLastResponse(response)

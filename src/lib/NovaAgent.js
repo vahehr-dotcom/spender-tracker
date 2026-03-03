@@ -4,10 +4,11 @@ import CategoryResolver from './CategoryResolver'
 import SpendingInsights from './SpendingInsights'
 
 class NovaAgent {
-  constructor(memoryManager, tools, isProMode) {
+  constructor(memoryManager, tools, isProMode, userGender) {
     this.memory = memoryManager
     this.tools = tools
     this.isProMode = isProMode
+    this.userGender = userGender || null
     this.pendingExpense = null
   }
 
@@ -203,7 +204,8 @@ Gently suggest PRO when user tries premium features.`
       description: parsed.description,
       fullMessage: '',
       categories,
-      userId
+      userId,
+      gender: this.userGender
     })
 
     if (!resolved.id) {
@@ -337,7 +339,8 @@ Gently suggest PRO when user tries premium features.`
         description: aiParsed.description,
         fullMessage: userMessage,
         categories,
-        userId: this.memory.userId
+        userId: this.memory.userId,
+        gender: this.userGender
       })
 
       const categoryName = resolved?.name || 'Miscellaneous'

@@ -1,12 +1,15 @@
 import { supabase } from '../supabaseClient'
 import ExpenseService from './ExpenseService'
 
+// Keywords that are gender-sensitive — these exist in both Barbershop and Hair & Beauty
+const GENDER_ROUTED_KEYWORDS = ['haircut', 'hair cut', 'trim', 'fantastic sams', 'supercuts', 'great clips']
+
 class CategoryResolver {
 
   // ============================================
   // MAIN WATERFALL - the only method you call
   // ============================================
-  static async resolve({ merchant, description, fullMessage, categories, userId }) {
+  static async resolve({ merchant, description, fullMessage, categories, userId, gender }) {
     const merchantKey = (merchant || '').toLowerCase().trim()
     if (!merchantKey || !categories || categories.length === 0) {
       return { id: null, name: null, resolvedBy: 'fallback', confidence: 0 }
@@ -25,6 +28,12 @@ class CategoryResolver {
     // Step 2: Global merchant cache
     const cached = await CategoryResolver.checkGlobalCache(merchantKey)
     if (cached && cached.confidence >= 0.6) {
+      // If cached result is gender-sensitive, re-route based on gender
+      const rerouted = CategoryResolver.applyGenderRoute(cached.category_name, gender, categories)
+      if (rerouted) {
+        console.log('🏷️ [2/5] Global cache (gender-routed):', merchantKey, '→', rerouted.name)
+        return { id: rerouted.id, name: rerouted.name, resolvedBy: 'global_cache', confidence: cached.confidence }
+      }
       const cat = categories.find(c => c.name.toLowerCase() === cached.category_name.toLowerCase())
       if (cat) {
         console.log('🏷️ [2/5] Global cache:', merchantKey, '→', cat.name, `(${cached.confidence})`)
@@ -37,11 +46,17 @@ class CategoryResolver {
       `${merchant} ${description || ''} ${fullMessage || ''}`
     )
     if (keywordMatch) {
+      // Check if this is a gender-sensitive match and re-route
+      const rerouted = CategoryResolver.applyGenderRoute(keywordMatch, gender, categories)
+      if (rerouted) {
+        console.log('🏷️ [3/5] Keyword map (gender-routed):', merchantKey, '→', rerouted.name)
+        CategoryResolver.updateGlobalCache(merchantKey, rerouted.name, 0.7).catch(() => {})
+        return { id: rerouted.id, name: rerouted.name, resolvedBy: 'keyword_map', confidence: 0.7 }
+      }
       const cat = categories.find(c => c.name.toLowerCase() === keywordMatch.toLowerCase())
         || categories.find(c => c.name.toLowerCase().includes(keywordMatch.toLowerCase()))
       if (cat) {
         console.log('🏷️ [3/5] Keyword map:', merchantKey, '→', cat.name)
-        // Cache this for future lookups
         CategoryResolver.updateGlobalCache(merchantKey, cat.name, 0.7).catch(() => {})
         return { id: cat.id, name: cat.name, resolvedBy: 'keyword_map', confidence: 0.7 }
       }
@@ -50,6 +65,12 @@ class CategoryResolver {
     // Step 4: AI classification (slow, costs money)
     const aiResult = await CategoryResolver.askAI(merchant, description, fullMessage, categories)
     if (aiResult) {
+      const rerouted = CategoryResolver.applyGenderRoute(aiResult, gender, categories)
+      if (rerouted) {
+        console.log('🏷️ [4/5] AI resolved (gender-routed):', merchantKey, '→', rerouted.name)
+        CategoryResolver.updateGlobalCache(merchantKey, rerouted.name, 0.8).catch(() => {})
+        return { id: rerouted.id, name: rerouted.name, resolvedBy: 'ai', confidence: 0.8 }
+      }
       const cat = categories.find(c => c.name.toLowerCase() === aiResult.toLowerCase())
         || categories.find(c => c.name.toLowerCase().includes(aiResult.toLowerCase()))
       if (cat) {
@@ -64,6 +85,31 @@ class CategoryResolver {
       || categories[0]
     console.log('🏷️ [5/5] Fallback:', merchantKey, '→', misc.name)
     return { id: misc.id, name: misc.name, resolvedBy: 'fallback', confidence: 0.1 }
+  }
+
+  // ============================================
+  // GENDER ROUTING - routes hair categories by gender
+  // ============================================
+  static applyGenderRoute(categoryName, gender, categories) {
+    if (!gender) return null
+    const lower = categoryName.toLowerCase()
+
+    const hairCategories = ['hair & beauty', 'barbershop']
+    if (!hairCategories.includes(lower)) return null
+
+    let targetName
+    if (gender === 'male') {
+      targetName = 'Barbershop'
+    } else if (gender === 'female') {
+      targetName = 'Hair & Beauty'
+    } else {
+      return null
+    }
+
+    if (lower === targetName.toLowerCase()) return null
+
+    const cat = categories.find(c => c.name === targetName)
+    return cat || null
   }
 
   // ============================================
@@ -111,7 +157,6 @@ class CategoryResolver {
         .maybeSingle()
 
       if (existing) {
-        // Weighted average confidence, increment count
         const newCount = existing.resolution_count + 1
         const newConfidence = Math.min(
           0.99,
@@ -174,7 +219,6 @@ class CategoryResolver {
   static async recordCorrection(userId, merchantName, categoryName) {
     const merchantKey = merchantName.toLowerCase().trim()
 
-    // Save personal override
     try {
       await supabase
         .from('user_category_overrides')
@@ -189,7 +233,6 @@ class CategoryResolver {
       console.error('❌ Override save failed:', err)
     }
 
-    // Also update global cache with high confidence
     await CategoryResolver.updateGlobalCache(merchantKey, categoryName, 0.9)
   }
 

@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient'
 export default function Onboarding({ user, onComplete, onLogout }) {
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
+  const [gender, setGender] = useState('')
   const [avatarUrl, setAvatarUrl] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState('')
@@ -63,7 +64,6 @@ export default function Onboarding({ user, onComplete, onLogout }) {
         setAvatarUrl(detectedAvatar)
       }
 
-      // Check if user is in pending_users list
       checkPendingUser(user.email)
 
       console.log('👤 OAuth data:', { metadata, detectedFirstName, detectedLastName, source })
@@ -100,25 +100,28 @@ export default function Onboarding({ user, onComplete, onLogout }) {
       return
     }
 
+    if (!gender) {
+      setError('Please select your gender')
+      return
+    }
+
     setIsSaving(true)
     setError('')
 
     try {
-      // Build profile data with pending user settings if they exist
       const profileData = {
         first_name: firstName.trim(),
         last_name: lastName.trim(),
+        gender,
         email: user.email,
         avatar_url: avatarUrl || null
       }
 
-      // Apply pending user settings
       if (pendingData) {
         profileData.role = pendingData.role || 'user'
         profileData.is_pro = pendingData.is_pro || false
         console.log('🎉 Applying pending user settings:', { role: profileData.role, is_pro: profileData.is_pro })
 
-        // Delete from pending_users after applying
         await supabase
           .from('pending_users')
           .delete()
@@ -131,6 +134,12 @@ export default function Onboarding({ user, onComplete, onLogout }) {
       setIsSaving(false)
     }
   }
+
+  const genderOptions = [
+    { value: 'male', label: '👨', sublabel: 'Male' },
+    { value: 'female', label: '👩', sublabel: 'Female' },
+    { value: 'other', label: '🧑', sublabel: 'Other' }
+  ]
 
   return (
     <div style={{
@@ -150,7 +159,6 @@ export default function Onboarding({ user, onComplete, onLogout }) {
         boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
         textAlign: 'center'
       }}>
-        {/* Avatar or Welcome Icon */}
         <div style={{
           width: '80px',
           height: '80px',
@@ -194,7 +202,6 @@ export default function Onboarding({ user, onComplete, onLogout }) {
             : "Let's personalize your experience. What should Nova call you?"}
         </p>
 
-        {/* Show if user is pre-registered */}
         {pendingData && (
           <div style={{
             padding: '12px 20px',
@@ -249,7 +256,7 @@ export default function Onboarding({ user, onComplete, onLogout }) {
             )}
           </div>
 
-          <div style={{ marginBottom: '30px', textAlign: 'left' }}>
+          <div style={{ marginBottom: '20px', textAlign: 'left' }}>
             <label style={{
               display: 'block',
               marginBottom: '8px',
@@ -278,6 +285,50 @@ export default function Onboarding({ user, onComplete, onLogout }) {
               onFocus={(e) => e.target.style.borderColor = '#667eea'}
               onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
             />
+          </div>
+
+          <div style={{ marginBottom: '30px', textAlign: 'left' }}>
+            <label style={{
+              display: 'block',
+              marginBottom: '12px',
+              fontSize: '14px',
+              fontWeight: 600,
+              color: '#374151'
+            }}>
+              I am <span style={{ color: '#ef4444' }}>*</span>
+            </label>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              {genderOptions.map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setGender(option.value)}
+                  style={{
+                    flex: 1,
+                    padding: '16px 12px',
+                    borderRadius: '16px',
+                    border: gender === option.value ? '3px solid #667eea' : '2px solid #e5e7eb',
+                    background: gender === option.value ? 'linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)' : 'white',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: gender === option.value ? '0 4px 12px rgba(102, 126, 234, 0.25)' : 'none'
+                  }}
+                >
+                  <span style={{ fontSize: '32px' }}>{option.label}</span>
+                  <span style={{
+                    fontSize: '13px',
+                    fontWeight: gender === option.value ? 700 : 500,
+                    color: gender === option.value ? '#667eea' : '#6b7280'
+                  }}>
+                    {option.sublabel}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {error && (
