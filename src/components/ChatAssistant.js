@@ -49,10 +49,11 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
   }, [isProMode])
 
   useEffect(() => {
-    if (agentRef.current && userProfile?.gender) {
-      agentRef.current.userGender = userProfile.gender
+    if (agentRef.current) {
+      if (userProfile?.gender) agentRef.current.userGender = userProfile.gender
+      if (userFeatures?.tier) agentRef.current.userTier = userFeatures.tier
     }
-  }, [userProfile])
+  }, [userProfile, userFeatures])
 
   useEffect(() => {
     if (!userId || initLockRef.current) return
@@ -95,7 +96,8 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
       }
 
       const userGender = userProfile?.gender || null
-      agentRef.current = new NovaAgent(memoryRef.current, tools, true, userGender)
+      const userTier = userFeatures?.tier || 'free'
+      agentRef.current = new NovaAgent(memoryRef.current, tools, true, userGender, userTier)
 
       try {
         const { data, error } = await supabase
@@ -113,7 +115,7 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
       }
 
       setIsInitialized(true)
-      console.log('✅ Nova initialized')
+      console.log('✅ Nova initialized with tier:', userTier)
     }
 
     initNova()
@@ -321,9 +323,13 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
       
       if (agentRef.current) {
         agentRef.current.isProMode = isProMode
+        if (userFeatures?.tier) agentRef.current.userTier = userFeatures.tier
       }
 
-      if (isProMode && agentRef.current) {
+      const tier = userFeatures?.tier || 'free'
+      const canAddExpenses = tier !== 'free'
+
+      if (canAddExpenses && agentRef.current) {
         const agentResult = await agentRef.current.detectAndExecute(userMessage, expenseData)
 
         if (agentResult.handled) {
@@ -348,17 +354,20 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
           }
         }
       } else {
-        const systemPrompt = `You are Nova, a friendly AI assistant for expense tracking. Be helpful and concise.${memoryRef.current.buildMemoryContext()}`
-        const conversationHistory = memoryRef.current.getConversationHistory()
-        const apiMessages = [
-          { role: 'system', content: systemPrompt },
-          ...conversationHistory.map(msg => ({ role: msg.role, content: msg.content })),
-          { role: 'user', content: userMessage }
-        ]
+        const systemPrompt = agentRef.current 
+          ? await agentRef.current.buildSystemPrompt(expenseData)
+          : `You are Nova, a friendly AI assistant for expense tracking. Be helpful and concise.${memoryRef.current.buildMemoryContext()}`
+        const messages = agentRef.current
+          ? agentRef.current.buildMessages(systemPrompt, userMessage)
+          : [
+              { role: 'system', content: systemPrompt },
+              ...memoryRef.current.getConversationHistory().map(msg => ({ role: msg.role, content: msg.content })),
+              { role: 'user', content: userMessage }
+            ]
         const apiResponse = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: apiMessages })
+          body: JSON.stringify({ messages })
         })
         const data = await apiResponse.json()
         if (data.choices && data.choices[0]) {
@@ -374,11 +383,11 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
         memoryRef.current.addMessage('assistant', response)
       }
 
-      if (isProMode) {
+      if (canAddExpenses) {
         speak(response)
       }
 
-      if (isProMode) {
+      if (canAddExpenses) {
         await memoryRef.current.saveConversation('user', userMessage)
         await memoryRef.current.saveConversation('assistant', response)
         await memoryRef.current.learnFromConversation(userMessage, response)
@@ -399,6 +408,8 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
   }
 
   const nickname = userProfile?.first_name || 'friend'
+  const tier = userFeatures?.tier || 'free'
+  const tierLabel = tier === 'max' ? 'MAX' : tier === 'pro' ? 'PRO' : tier === 'admin' ? 'ADMIN' : tier === 'tester' ? 'TESTER' : null
 
   return (
     <div style={{
@@ -411,15 +422,15 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <h3 style={{ margin: 0 }}>🤖 Nova AI Assistant</h3>
-          {isProMode && (
+          {tierLabel && (
             <span style={{
-              background: 'rgba(255,255,255,0.3)',
+              background: tier === 'max' ? 'rgba(245, 158, 11, 0.4)' : tier === 'admin' ? 'rgba(236, 72, 153, 0.4)' : 'rgba(255,255,255,0.3)',
               padding: '4px 12px',
               borderRadius: '12px',
               fontSize: '12px',
               fontWeight: 'bold'
             }}>
-              PRO
+              {tierLabel}
             </span>
           )}
         </div>
@@ -500,7 +511,7 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
           value={aiInput}
           onChange={(e) => setAiInput(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && handleAISubmit()}
-          placeholder={isProMode ? `Ask Nova anything, ${nickname}...` : "Ask Nova about your expenses..."}
+          placeholder={isProMode ? `Ask Nova anything, ${nickname}...` : `Chat with Nova, ${nickname}...`}
           disabled={isThinking || isListening}
           style={{
             flex: 1,
@@ -596,7 +607,7 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
         </div>
       )}
 
-      {!isProMode && (
+      {tier === 'free' && (
         <div style={{
           marginTop: '15px',
           padding: '12px',

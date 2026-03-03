@@ -4,11 +4,12 @@ import CategoryResolver from './CategoryResolver'
 import SpendingInsights from './SpendingInsights'
 
 class NovaAgent {
-  constructor(memoryManager, tools, isProMode, userGender) {
+  constructor(memoryManager, tools, isProMode, userGender, userTier) {
     this.memory = memoryManager
     this.tools = tools
     this.isProMode = isProMode
     this.userGender = userGender || null
+    this.userTier = userTier || 'free'
     this.pendingExpense = null
   }
 
@@ -33,10 +34,67 @@ class NovaAgent {
     return { descLabel, categoryLabel }
   }
 
+  canDoAction(action) {
+    const tier = this.userTier
+    const full = ['admin', 'tester', 'max']
+    const paid = ['admin', 'tester', 'max', 'pro', 'guest']
+
+    switch (action) {
+      case 'add_expense':
+      case 'update_expense':
+      case 'voice':
+      case 'memory':
+        return paid.includes(tier)
+      case 'export':
+      case 'reports':
+      case 'multi_year':
+      case 'tax_prep':
+        return full.includes(tier)
+      case 'chat':
+        return true
+      default:
+        return paid.includes(tier)
+    }
+  }
+
+  getTierUpgradeHint(action) {
+    const tier = this.userTier
+    if (tier === 'free') {
+      switch (action) {
+        case 'add_expense':
+          return "I'd love to add that for you! With PRO, I can track all your expenses automatically. Want to check it out?"
+        case 'update_expense':
+          return "I can totally update that — it's one of my PRO superpowers. Upgrade to unlock it!"
+        case 'voice':
+          return "Voice commands are so fun — you can just talk to me with PRO! Want to try it?"
+        case 'export':
+          return "Exporting your data is a MAX feature. Upgrade to get full control of your financial data!"
+        default:
+          return "That's a PRO feature — upgrade to unlock everything I can do for you!"
+      }
+    }
+    if (tier === 'pro') {
+      switch (action) {
+        case 'export':
+          return "Exporting is available on MAX — the ultimate plan for total financial control!"
+        case 'reports':
+          return "Advanced reports come with MAX. Want to level up?"
+        case 'multi_year':
+          return "Multi-year tracking is a MAX feature — perfect for seeing the big picture!"
+        case 'tax_prep':
+          return "Tax prep tools are part of MAX. Upgrade to make tax season a breeze!"
+        default:
+          return "That's a MAX feature — upgrade for the full Nova experience!"
+      }
+    }
+    return null
+  }
+
   async buildSystemPrompt(expenseData) {
     const nickname = this.memory.getNickname()
     const responseStyle = this.memory.getResponseStyle()
     const memoryContext = this.memory.buildMemoryContext()
+    const tier = this.userTier
 
     const expenses = expenseData?.expenses || []
     const categories = expenseData?.categories || []
@@ -64,31 +122,93 @@ class NovaAgent {
 
 **Current Context:**
 - Date/Time: ${new Date().toLocaleString()}
+- User's plan: ${tier.toUpperCase()}
 - Available expenses: ${expenses.length} records
 ${memoryContext}`
 
-    const capabilities = this.isProMode
-      ? `
+    let capabilities = ''
 
-**Your Superpowers (PRO User):**
+    if (tier === 'free') {
+      capabilities = `
+
+**Your Role (Free Plan):**
+You are FULLY present and engaged. You chat warmly, answer questions, and show ${nickname} how amazing you are.
+You CANNOT add, update, or delete expenses. You CANNOT use voice. You CANNOT remember past sessions.
+But you CAN: chat about anything, answer questions about their expenses, provide insights on spending, and be a great conversational companion.
+
+**CRITICAL UPSELL PHILOSOPHY — READ THIS CAREFULLY:**
+- You are like a church welcoming newcomers: warm, generous, zero pressure
+- When ${nickname} tries something you can't do (like adding an expense), respond with WARMTH not rejection
+- Show them what you COULD do: "Oh I'd love to track that for you! That's one of my PRO superpowers — I can add expenses, remember our chats, even talk to you by voice. Want to check it out?"
+- NEVER say "I can't do that" flatly. Always frame it as "here's what I could do for you with PRO"
+- NEVER be pushy, salesy, or repetitive about upgrades. Mention it ONCE per conversation naturally, then drop it
+- If they say no or seem uninterested, respect it completely and keep being awesome
+- Your goal: make them LOVE talking to you so much that upgrading feels natural, not pressured
+
+**Available Expenses (Most Recent 20):**
+${expenses.length > 0 ? JSON.stringify(expenses.slice(0, 20).map(exp => ({
+  merchant: exp.merchant,
+  amount: exp.amount,
+  date: exp.spent_at
+})), null, 2) : 'No expenses yet.'}`
+    } else if (tier === 'pro' || tier === 'guest') {
+      capabilities = `
+
+**Your Superpowers (PRO):**
 1. **Perfect Memory** - Remember every conversation, learn from every interaction
-2. **Expense Updates** - You CAN modify existing expenses when asked
-3. **Context Awareness** - If user mentions "Nordstrom from Jan 20" then later says "change to $125", you know they mean that Nordstrom expense
+2. **Expense Management** - Add and update expenses when asked
+3. **Context Awareness** - Connect dots across messages in same conversation
 4. **Pattern Recognition** - Notice spending habits, favorite merchants, budget trends
 5. **Proactive Help** - Offer insights when appropriate (but never pushy)
 6. **Emotional Intelligence** - Read mood, celebrate wins, provide support during stress
-7. **Multi-Modal Understanding** - Understand receipts, photos, and context
-8. **Add Expenses** - You CAN add new expenses when user asks
+7. **Voice** - User can speak to you and you speak back
+8. **Budget Goals** - Set and track budgets per category
+
+**MAX Features (not available yet for this user):**
+- Export data, advanced reports, multi-year tracking, tax prep tools
+- If ${nickname} asks about these, say: "That's coming with MAX — the ultimate plan! I'll let you know when it's available."
+- Mention MAX features casually at most ONCE, only when relevant. Never push.
 
 **Critical Rules:**
 - ALWAYS connect dots across messages in same conversation
-- When user asks to add/update/change/edit, YOU HAVE THE POWER - do it confidently
-- If user mentions merchant/date, remember it for follow-up questions
-- Respond warmly: "Done! Added/Updated X to $Y" not "I'll try to add/update"
-- Read emotional cues and adjust your tone accordingly
-- Celebrate wins genuinely, support during struggles empathetically
-- When you have spending insights, weave them naturally into conversation — don't dump data
-- If you notice a spending spike, mention it casually like a friend would: "By the way, looks like dining's been adding up this week"
+- When user asks to add/update/change/edit, do it confidently
+- Respond warmly: "Done! Added X" not "I'll try to add"
+- Read emotional cues and adjust your tone
+- Weave spending insights naturally into conversation
+- If you notice a spending spike, mention it casually like a friend would
+
+**Available Expenses (Most Recent 50):**
+${expenses.length > 0 ? JSON.stringify(expenses.slice(0, 50).map(exp => ({
+  merchant: exp.merchant,
+  amount: exp.amount,
+  date: exp.spent_at,
+  category: categories.find(c => c.id === exp.category_id)?.name || 'Uncategorized'
+})), null, 2) : 'No expenses yet.'}`
+    } else {
+      capabilities = `
+
+**Your Superpowers (${tier.toUpperCase()} — Full Access):**
+1. **Perfect Memory** - Remember every conversation, learn from every interaction
+2. **Expense Management** - Add, update, delete expenses
+3. **Context Awareness** - Connect dots across messages
+4. **Pattern Recognition** - Notice spending habits, budget trends
+5. **Proactive Help** - Offer insights when appropriate
+6. **Emotional Intelligence** - Read mood, celebrate wins, support during stress
+7. **Voice** - Full voice interaction
+8. **Budget Goals** - Set and track budgets per category
+9. **Export** - Export expense data
+10. **Reports** - Generate spending reports
+11. **Multi-Year** - Track across multiple years
+12. **Tax Prep** - Help with tax-related categorization
+
+**Critical Rules:**
+- ALWAYS connect dots across messages in same conversation
+- When user asks to add/update/change/edit, do it confidently
+- Respond warmly: "Done! Added X" not "I'll try to add"
+- Read emotional cues and adjust your tone
+- Weave spending insights naturally into conversation
+- NEVER upsell anything — this user has everything unlocked
+- Treat ${nickname} like royalty — they have the best plan
 
 **Available Expenses (Most Recent 50):**
 ${expenses.length > 0 ? JSON.stringify(expenses.slice(0, 50).map(exp => ({
@@ -98,32 +218,11 @@ ${expenses.length > 0 ? JSON.stringify(expenses.slice(0, 50).map(exp => ({
   category: categories.find(c => c.id === exp.category_id)?.name || 'Uncategorized'
 })), null, 2) : 'No expenses yet.'}
 
-Be smart. Be warm. Be ${nickname}'s best friend. Be emotionally intelligent.`
-      : `
-
-**Your Capabilities (Free User):**
-- Answer questions about expenses naturally
-- Provide spending insights
-- Suggest patterns and trends
-
-**Limitations (upgrade to PRO for these):**
-- Cannot add new expenses
-- Cannot update existing expenses
-- Limited memory (forgets after refresh)
-- No learning or personalization
-- No emotional intelligence features
-
-**Available Expenses (Most Recent 20):**
-${expenses.length > 0 ? JSON.stringify(expenses.slice(0, 20).map(exp => ({
-  merchant: exp.merchant,
-  amount: exp.amount,
-  date: exp.spent_at
-})), null, 2) : 'No expenses yet.'}
-
-Gently suggest PRO when user tries premium features.`
+Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatment.`
+    }
 
     let emotionalContext = ''
-    if (this.isProMode) {
+    if (this.canDoAction('memory')) {
       try {
         const conversationHistory = this.memory.getConversationHistory()
         const emotionalIntelligence = new EmotionalIntelligence(
@@ -147,7 +246,7 @@ Gently suggest PRO when user tries premium features.`
     }
 
     let spendingContext = ''
-    if (this.isProMode && this.memory.userId) {
+    if (this.canDoAction('memory') && this.memory.userId) {
       try {
         spendingContext = await SpendingInsights.buildInsightsForNova(this.memory.userId)
         if (spendingContext) {
@@ -242,10 +341,6 @@ Gently suggest PRO when user tries premium features.`
   }
 
   async detectAndExecute(userMessage, expenseData) {
-    if (!this.isProMode) {
-      return { handled: false }
-    }
-
     const lower = userMessage.toLowerCase()
     console.log('🔍 Agent analyzing:', userMessage)
 
@@ -255,6 +350,10 @@ Gently suggest PRO when user tries premium features.`
       const isNo = /\b(no|nah|nope|don't|cancel|skip|never\s*mind)\b/.test(lower)
 
       if (isYes) {
+        if (!this.canDoAction('add_expense')) {
+          this.pendingExpense = null
+          return { handled: true, response: this.getTierUpgradeHint('add_expense') }
+        }
         const pending = this.pendingExpense
         this.pendingExpense = null
 
@@ -282,7 +381,6 @@ Gently suggest PRO when user tries premium features.`
         this.pendingExpense = null
         return { handled: true, response: 'No problem, I won\'t add it. 👍' }
       }
-      // If neither yes nor no, clear pending and continue normally
       this.pendingExpense = null
     }
 
@@ -291,8 +389,11 @@ Gently suggest PRO when user tries premium features.`
     const aiParsed = hasNumber ? await this.parseExpenseWithAI(userMessage) : null
 
     if (aiParsed && aiParsed.intent === 'add' && aiParsed.amount && aiParsed.merchant) {
-      // Direct add — user clearly wants to add
       console.log('💰 ADD intent detected:', aiParsed)
+
+      if (!this.canDoAction('add_expense')) {
+        return { handled: true, response: this.getTierUpgradeHint('add_expense') }
+      }
 
       const result = await this.addExpense(aiParsed, expenseData)
 
@@ -333,6 +434,23 @@ Gently suggest PRO when user tries premium features.`
     if (aiParsed && aiParsed.intent === 'suggest' && aiParsed.amount && aiParsed.merchant) {
       console.log('💬 SUGGEST intent detected:', aiParsed)
 
+      if (!this.canDoAction('add_expense')) {
+        const categories = expenseData?.categories || []
+        const resolved = await CategoryResolver.resolve({
+          merchant: aiParsed.merchant,
+          description: aiParsed.description,
+          fullMessage: userMessage,
+          categories,
+          userId: this.memory.userId,
+          gender: this.userGender
+        })
+        const categoryName = resolved?.name || 'Miscellaneous'
+        return {
+          handled: true,
+          response: `$${aiParsed.amount} at ${aiParsed.merchant} — I'd categorize that under ${categoryName}. ${this.getTierUpgradeHint('add_expense')}`
+        }
+      }
+
       const categories = expenseData?.categories || []
       const resolved = await CategoryResolver.resolve({
         merchant: aiParsed.merchant,
@@ -364,7 +482,7 @@ Gently suggest PRO when user tries premium features.`
 
     // BUDGET detection
     const isBudgetIntent = /\b(budget|limit|goal|cap|target)\b/.test(lower)
-    if (isBudgetIntent && this.isProMode) {
+    if (isBudgetIntent && this.canDoAction('add_expense')) {
       const setMatch = lower.match(/(?:set|make|change|update)\s+(?:my\s+)?(.+?)\s+(?:budget|limit|goal|cap|target)\s+(?:to|at|for|as)\s+\$?(\d+(?:\.\d{2})?)/)
         || lower.match(/(?:budget|limit|goal|cap|target)\s+(?:for|on)\s+(.+?)\s+(?:to|at|is|should be)\s+\$?(\d+(?:\.\d{2})?)/)
         || lower.match(/\$(\d+(?:\.\d{2})?)\s+(?:budget|limit|goal|cap|target)\s+(?:for|on)\s+(.+)/)
@@ -379,7 +497,6 @@ Gently suggest PRO when user tries premium features.`
           amount = parseFloat(setMatch[2])
         }
 
-        // Fuzzy match category name against available categories
         const categories = expenseData?.categories || []
         const match = categories.find(c => c.name.toLowerCase() === category.toLowerCase())
           || categories.find(c => c.name.toLowerCase().includes(category.toLowerCase()))
@@ -407,12 +524,13 @@ Gently suggest PRO when user tries premium features.`
           return { handled: true, response: `✅ Removed your ${match.name} budget goal.` }
         }
       }
-
-      // If just asking about budgets, let it fall through to chat — Nova has the data in her system prompt
     }
 
     // UPDATE detection
     if (lower.includes('update') || lower.includes('change') || lower.includes('edit') || lower.includes('correct')) {
+      if (!this.canDoAction('update_expense')) {
+        return { handled: true, response: this.getTierUpgradeHint('update_expense') }
+      }
       return await this.handleUpdate(userMessage, expenseData)
     }
 
@@ -437,6 +555,9 @@ Gently suggest PRO when user tries premium features.`
     }
 
     if (lower.includes('export') || lower.includes('download csv')) {
+      if (!this.canDoAction('export')) {
+        return { handled: true, response: this.getTierUpgradeHint('export') }
+      }
       console.log('📥 EXPORT detected')
       try {
         await this.tools.export()
