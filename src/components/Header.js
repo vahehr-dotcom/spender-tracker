@@ -187,19 +187,7 @@ export default function Header({
           📤 Export
         </button>
 
-        <button
-          onClick={onLogout}
-          style={{
-            padding: '10px 15px',
-            background: '#ef4444',
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer'
-          }}
-        >
-          Logout
-        </button>
+       
       </div>
     </div>
   )

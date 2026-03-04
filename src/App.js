@@ -555,7 +555,8 @@ function MainApp() {
         userProfile={userProfile}
         userId={session.user.id}
         userFeatures={userFeatures}
-        onProfileUpdate={handleProfileUpdate}
+      onProfileUpdate={handleProfileUpdate}
+        onLogout={handleLogout}
       />
     </div>
   )

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import subscriptionManager from '../lib/SubscriptionManager'
 
-export default function SettingsDrawer({ isOpen, onClose, userProfile, userId, userFeatures, onProfileUpdate }) {
+export default function SettingsDrawer({ isOpen, onClose, userProfile, userId, userFeatures, onProfileUpdate, onLogout }) {
   const [activeSection, setActiveSection] = useState('profile')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
@@ -767,6 +767,35 @@ export default function SettingsDrawer({ isOpen, onClose, userProfile, userId, u
               </div>
             </div>
           )}
+       </div>
+
+        <div style={{
+          padding: '16px 24px',
+          borderTop: '1px solid #e5e7eb'
+        }}>
+          <button
+            onClick={() => {
+              if (window.confirm('Are you sure you want to log out?')) {
+                onLogout()
+              }
+            }}
+            style={{
+              width: '100%',
+              padding: '12px',
+              borderRadius: '10px',
+              border: '2px solid #ef4444',
+              background: 'white',
+              color: '#ef4444',
+              fontSize: '15px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+            onMouseOver={(e) => { e.target.style.background = '#ef4444'; e.target.style.color = 'white' }}
+            onMouseOut={(e) => { e.target.style.background = 'white'; e.target.style.color = '#ef4444' }}
+          >
+            Log Out
+          </button>
         </div>
       </div>
     </>
