@@ -87,4 +87,131 @@ export default function Header({
           boxShadow: '0 2px 8px rgba(102, 126, 234, 0.3)'
         }}
         onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
-        onMouseOut={(e) => e.currentTarget.styl
+        onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+      >
+        <div style={{
+          width: '36px',
+          height: '36px',
+          borderRadius: '50%',
+          background: 'rgba(255,255,255,0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '20px',
+          overflow: 'hidden'
+        }}>
+          {getAvatarContent()}
+        </div>
+        <span>
+          {getDisplayName()}
+          {getTitle() && ` - ${getTitle()}`}
+        </span>
+        {badge && (
+          <span style={{
+            padding: '3px 8px',
+            borderRadius: '6px',
+            fontSize: '11px',
+            fontWeight: 700,
+            background: badge.bg,
+            color: 'white',
+            letterSpacing: '0.5px'
+          }}>
+            {badge.label}
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+        {isTester && (
+          <button
+            onClick={onTestModeToggle}
+            style={{
+              padding: '10px 15px',
+              background: testMode ? '#6b7280' : '#10b981',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            {testMode ? '⚙️ Basic Mode' : '✅ PRO Mode'}
+          </button>
+        )}
+
+        {isAdmin && (
+          <>
+            <button
+              onClick={onOpenAdmin}
+              style={{
+                padding: '10px 15px',
+                background: 'linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              👑 Admin
+            </button>
+            <button
+              onClick={() => navigate('/login-history')}
+              style={{
+                padding: '10px 15px',
+                background: '#3b82f6',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              📊 Login History
+            </button>
+            <button
+              onClick={() => navigate('/analytics')}
+              style={{
+                padding: '10px 15px',
+                background: '#8b5cf6',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              📈 Analytics
+            </button>
+          </>
+        )}
+
+        <button
+          onClick={onImport}
+          style={{
+            padding: '10px 15px',
+            background: '#10b981',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer'
+          }}
+        >
+          📥 Import
+        </button>
+
+        <button
+          onClick={onExport}
+          style={{
+            padding: '10px 15px',
+            background: '#f59e0b',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer'
+          }}
+        >
+          📤 Export
+        </button>
+      </div>
+    </div>
+  )
+}
