@@ -109,7 +109,12 @@ Rules:
           })
         })
 
-        const data = await response.json()
+       const data = await response.json()
+        if (!data.choices || !data.choices[0]?.message?.content) {
+          setAiInsights([])
+          setLoadingInsights(false)
+          return
+        }
         const content = data.choices[0].message.content.trim()
 
         // Parse JSON response (handle code fence if present)
