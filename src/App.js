@@ -305,6 +305,7 @@ function MainApp() {
             onUpgrade={() => setShowUpgrade(true)}
             onOpenAdmin={() => setShowAdmin(true)}
             onOpenSettings={() => setShowSettings(true)}
+            userFeatures={userFeatures}
           />
 
           {!isProMode && (
