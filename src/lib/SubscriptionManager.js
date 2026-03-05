@@ -105,7 +105,7 @@ class SubscriptionManager {
       .from('user_subscriptions')
       .select('*')
       .eq('user_id', userId)
-      .single()
+      .maybeSingle()
 
     if (error || !data) {
       console.error('SubscriptionManager: Failed to fetch subscription', error)
@@ -194,9 +194,9 @@ class SubscriptionManager {
       .select('*')
       .eq('user_id', userId)
       .eq('usage_date', today)
-      .single()
+      .maybeSingle()
 
-    if (error && error.code !== 'PGRST116') {
+    if (error) {
       console.error('SubscriptionManager: Failed to fetch daily usage', error)
     }
 
@@ -215,7 +215,7 @@ class SubscriptionManager {
       .select('id, ' + type)
       .eq('user_id', userId)
       .eq('usage_date', today)
-      .single()
+      .maybeSingle()
 
     if (existing) {
       await supabase
