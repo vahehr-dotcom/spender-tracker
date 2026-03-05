@@ -111,6 +111,16 @@ export function useUserData() {
 
       if (error) throw error
 
+      // Ensure user_subscriptions row exists
+      await supabase
+        .from('user_subscriptions')
+        .upsert({
+          user_id: userId,
+          tier: 'free',
+          subscription_status: 'free',
+          trial_used: false
+        }, { onConflict: 'user_id', ignoreDuplicates: true })
+
       setUserProfile(data)
       return { success: true, profile: data }
     } catch (err) {
@@ -158,7 +168,7 @@ export function useUserData() {
       }
 
       const filtered = data.filter(c => c.user_id === null || c.user_id === userId)
-      
+
       const mains = filtered.filter(c => c.parent_id === null)
       const subs = filtered.filter(c => c.parent_id !== null)
 
@@ -196,10 +206,10 @@ export function useUserData() {
       if (error) throw error
 
       setCategories(prev => [...prev, data])
-      
+
       if (parentId) {
-        setMainCategories(prev => prev.map(main => 
-          main.id === parentId 
+        setMainCategories(prev => prev.map(main =>
+          main.id === parentId
             ? { ...main, subcategories: [...main.subcategories, data] }
             : main
         ))
@@ -223,7 +233,7 @@ export function useUserData() {
 
   const loadAllUserData = useCallback(async (userId, email) => {
     console.log('🔄 loadAllUserData called:', userId, email)
-    
+
     const [role, profile, subscription, cats] = await Promise.all([
       loadUserRole(userId),
       loadUserProfile(userId, email),
