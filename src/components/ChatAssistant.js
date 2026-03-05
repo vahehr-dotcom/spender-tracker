@@ -141,9 +141,20 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
       greeting = `Hey there! Good to see you.`
     }
 
-    console.log('👋 Greeting:', greeting)
-    setLastResponse(greeting)
-    setTimeout(() => speak(greeting), 1000)
+  console.log('👋 Greeting:', greeting)
+setLastResponse(greeting)
+// Only speak if user has already interacted with the page
+if (document.hasFocus() && document.visibilityState === 'visible') {
+  const trySpeak = () => {
+    speak(greeting)
+    document.removeEventListener('click', trySpeak)
+    document.removeEventListener('keydown', trySpeak)
+  }
+  document.addEventListener('click', trySpeak, { once: true })
+  document.addEventListener('keydown', trySpeak, { once: true })
+} else {
+  setTimeout(() => speak(greeting), 1000)
+}
 
   }, [userId, userProfile, isInitialized, hasGreeted, voiceGreetingEnabled])
 
