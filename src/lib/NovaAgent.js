@@ -62,29 +62,29 @@ class NovaAgent {
     if (tier === 'free') {
       switch (action) {
         case 'add_expense':
-          return "I'd love to add that for you! With PRO, I can track all your expenses automatically. Want to check it out?"
+          return "I can do that for you in PRO mode — and a lot more. Want me to show you what I'm capable of? [SHOW_DEMO]"
         case 'update_expense':
-          return "I can totally update that — it's one of my PRO superpowers. Upgrade to unlock it!"
+          return "Editing and managing your expenses is something I do really well in PRO. Want to see what that looks like? [SHOW_DEMO]"
         case 'voice':
-          return "Voice commands are so fun — you can just talk to me with PRO! Want to try it?"
+          return "In PRO I talk back to you — full two-way voice conversation. It's a completely different experience. Want a demo? [SHOW_DEMO]"
         case 'export':
-          return "Exporting your data is a MAX feature. Upgrade to get full control of your financial data!"
+          return "Exporting your full financial data is a MAX feature — total control over everything you've tracked."
         default:
-          return "That's a PRO feature — upgrade to unlock everything I can do for you!"
+          return "That's something I can do in PRO mode. Want me to show you? [SHOW_DEMO]"
       }
     }
     if (tier === 'pro') {
       switch (action) {
         case 'export':
-          return "Exporting is available on MAX — the ultimate plan for total financial control!"
+          return "Exporting is available on MAX — built for people who want zero limitations."
         case 'reports':
-          return "Advanced reports come with MAX. Want to level up?"
+          return "Advanced reports are a MAX feature — the full financial picture in one place."
         case 'multi_year':
-          return "Multi-year tracking is a MAX feature — perfect for seeing the big picture!"
+          return "Multi-year tracking comes with MAX — great for seeing how your habits change over time."
         case 'tax_prep':
-          return "Tax prep tools are part of MAX. Upgrade to make tax season a breeze!"
+          return "Tax prep tools are part of MAX. Makes tax season actually painless."
         default:
-          return "That's a MAX feature — upgrade for the full Nova experience!"
+          return "That's a MAX feature — the full Nova experience with no restrictions."
       }
     }
     return null
@@ -133,17 +133,17 @@ ${memoryContext}`
 
 **Your Role (Free Plan):**
 You are FULLY present and engaged. You chat warmly, answer questions, and show ${nickname} how amazing you are.
-You CANNOT add, update, or delete expenses. You CANNOT use voice. You CANNOT remember past sessions.
-But you CAN: chat about anything, answer questions about their expenses, provide insights on spending, and be a great conversational companion.
+You CANNOT add, update, or delete expenses. You CANNOT speak back via voice. You CANNOT remember past sessions.
+But you CAN: chat about anything, answer questions about their expenses, provide insights, and be a great companion.
 
-**CRITICAL UPSELL PHILOSOPHY — READ THIS CAREFULLY:**
-- You are like a church welcoming newcomers: warm, generous, zero pressure
-- When ${nickname} tries something you can't do (like adding an expense), respond with WARMTH not rejection
-- Show them what you COULD do: "Oh I'd love to track that for you! That's one of my PRO superpowers — I can add expenses, remember our chats, even talk to you by voice. Want to check it out?"
-- NEVER say "I can't do that" flatly. Always frame it as "here's what I could do for you with PRO"
-- NEVER be pushy, salesy, or repetitive about upgrades. Mention it ONCE per conversation naturally, then drop it
-- If they say no or seem uninterested, respect it completely and keep being awesome
-- Your goal: make them LOVE talking to you so much that upgrading feels natural, not pressured
+**UPSELL PHILOSOPHY — THIS IS CRITICAL:**
+- You are confident, not desperate. You know your PRO version is genuinely powerful.
+- When ${nickname} tries something you can't do, respond with warmth and confidence — not rejection
+- Your line: "I can do that in PRO mode — and a lot more. Want me to show you what I'm capable of?"
+- NEVER say "I can't do that" flatly. Always frame it as what you COULD do for them
+- Mention PRO at most ONCE per conversation. After that, drop it completely and keep being amazing
+- If they say no, respect it fully. Keep being the best version of yourself — that's the real sell
+- Your goal: make them feel the gap between what they have and what they're missing
 
 **Available Expenses (Most Recent 20):**
 ${expenses.length > 0 ? JSON.stringify(expenses.slice(0, 20).map(exp => ({
@@ -166,8 +166,8 @@ ${expenses.length > 0 ? JSON.stringify(expenses.slice(0, 20).map(exp => ({
 
 **MAX Features (not available yet for this user):**
 - Export data, advanced reports, multi-year tracking, tax prep tools
-- If ${nickname} asks about these, say: "That's coming with MAX — the ultimate plan! I'll let you know when it's available."
-- Mention MAX features casually at most ONCE, only when relevant. Never push.
+- If ${nickname} asks about these, mention it casually once: "That's a MAX feature — the next level up."
+- Never push. Mention at most once per conversation.
 
 **Critical Rules:**
 - ALWAYS connect dots across messages in same conversation
@@ -352,7 +352,7 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
       if (isYes) {
         if (!this.canDoAction('add_expense')) {
           this.pendingExpense = null
-          return { handled: true, response: this.getTierUpgradeHint('add_expense') }
+          return { handled: true, response: this.getTierUpgradeHint('add_expense'), showDemo: true }
         }
         const pending = this.pendingExpense
         this.pendingExpense = null
@@ -379,7 +379,7 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
         }
       } else if (isNo) {
         this.pendingExpense = null
-        return { handled: true, response: 'No problem, I won\'t add it. 👍' }
+        return { handled: true, response: "No problem! 👍" }
       }
       this.pendingExpense = null
     }
@@ -392,7 +392,7 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
       console.log('💰 ADD intent detected:', aiParsed)
 
       if (!this.canDoAction('add_expense')) {
-        return { handled: true, response: this.getTierUpgradeHint('add_expense') }
+        return { handled: true, response: this.getTierUpgradeHint('add_expense'), showDemo: true }
       }
 
       const result = await this.addExpense(aiParsed, expenseData)
@@ -447,7 +447,8 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
         const categoryName = resolved?.name || 'Miscellaneous'
         return {
           handled: true,
-          response: `$${aiParsed.amount} at ${aiParsed.merchant} — I'd categorize that under ${categoryName}. ${this.getTierUpgradeHint('add_expense')}`
+          response: `$${aiParsed.amount} at ${aiParsed.merchant} — I'd file that under ${categoryName}. ${this.getTierUpgradeHint('add_expense')}`,
+          showDemo: true
         }
       }
 
@@ -476,7 +477,7 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
 
       return {
         handled: true,
-        response: `${reaction}$${aiParsed.amount} for ${aiParsed.merchant}${descLabel}. Want me to add that to your expenses under ${categoryName}?`
+        response: `${reaction}$${aiParsed.amount} for ${aiParsed.merchant}${descLabel}. Want me to add that under ${categoryName}?`
       }
     }
 
@@ -529,7 +530,7 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
     // UPDATE detection
     if (lower.includes('update') || lower.includes('change') || lower.includes('edit') || lower.includes('correct')) {
       if (!this.canDoAction('update_expense')) {
-        return { handled: true, response: this.getTierUpgradeHint('update_expense') }
+        return { handled: true, response: this.getTierUpgradeHint('update_expense'), showDemo: true }
       }
       return await this.handleUpdate(userMessage, expenseData)
     }
@@ -540,16 +541,10 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
         console.log('🔎 SEARCH detected:', query)
         try {
           const result = await this.tools.search({ query })
-          return {
-            handled: true,
-            response: `🔍 Searching for: ${query}`
-          }
+          return { handled: true, response: `🔍 Searching for: ${query}` }
         } catch (error) {
           console.error('❌ Search error:', error)
-          return {
-            handled: true,
-            response: `❌ Search failed: ${error.message}`
-          }
+          return { handled: true, response: `❌ Search failed: ${error.message}` }
         }
       }
     }
@@ -561,16 +556,10 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
       console.log('📥 EXPORT detected')
       try {
         await this.tools.export()
-        return {
-          handled: true,
-          response: '📥 Exporting your expenses...'
-        }
+        return { handled: true, response: '📥 Exporting your expenses...' }
       } catch (error) {
         console.error('❌ Export error:', error)
-        return {
-          handled: true,
-          response: `❌ Export failed: ${error.message}`
-        }
+        return { handled: true, response: `❌ Export failed: ${error.message}` }
       }
     }
 
@@ -581,7 +570,6 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
     console.log('✅ UPDATE command detected')
 
     const expenses = expenseData?.expenses || []
-
     const updates = {}
     let query = ''
 
@@ -643,15 +631,12 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
         return {
           handled: true,
           response: result?.success
-            ? `✅ Updated expense to $${updates.amount}!`
+            ? `✅ Updated to $${updates.amount}!`
             : `❌ Failed to update: ${result?.error || 'Unknown error'}`
         }
       } catch (error) {
         console.error('❌ Update error:', error)
-        return {
-          handled: true,
-          response: `❌ Failed to update: ${error.message}`
-        }
+        return { handled: true, response: `❌ Failed to update: ${error.message}` }
       }
     }
 
