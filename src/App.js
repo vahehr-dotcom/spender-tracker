@@ -86,7 +86,7 @@ function MainApp() {
     if (session?.user) {
       const initializeUser = async () => {
         const { needsOnboarding } = await checkOnboardingStatus(session.user.id)
-        
+
         if (needsOnboarding) {
           setShowOnboarding(true)
         } else {
@@ -109,13 +109,13 @@ function MainApp() {
 
   const handleOnboardingComplete = async (profileData) => {
     const result = await saveUserProfile(session.user.id, profileData)
-    
+
     if (result.success) {
       setShowOnboarding(false)
       await loadAllUserData(session.user.id, session.user.email)
       await loadExpenses(session.user.id)
     }
-    
+
     return result
   }
 
@@ -138,12 +138,11 @@ function MainApp() {
   })
 
   const tier = userFeatures?.tier || 'free'
+  const isFree = tier === 'free'
   const isProMode = !testMode && (tier === 'pro' || tier === 'max' || tier === 'admin' || tier === 'tester' || tier === 'guest')
   const aiInsights = isProMode ? calculateAIInsights(allExpenses, categories) : null
 
-  const handleSearch = () => {
-    setSearchTerm(searchInput)
-  }
+  const handleSearch = () => setSearchTerm(searchInput)
 
   const handleClearSearch = () => {
     setSearchInput('')
@@ -291,7 +290,7 @@ function MainApp() {
           boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
           marginBottom: '20px'
         }}>
-         <Header
+          <Header
             userProfile={userProfile}
             userEmail={session.user.email}
             isAdmin={isAdmin()}
@@ -308,7 +307,7 @@ function MainApp() {
             userFeatures={userFeatures}
           />
 
-          {!isProMode && (
+          {isFree && (
             <div style={{
               background: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)',
               padding: '15px',
@@ -319,7 +318,7 @@ function MainApp() {
               justifyContent: 'space-between',
               alignItems: 'center'
             }}>
-              <span style={{ fontWeight: 'bold' }}>⚡ Unlock PRO features: AI Insights, Voice Commands, Predictions & More!</span>
+              <span style={{ fontWeight: 'bold' }}>⚡ Unlock PRO: AI Insights, Import/Export, Receipt Scanning & More!</span>
               <button
                 onClick={() => setShowUpgrade(true)}
                 style={{
@@ -440,19 +439,21 @@ function MainApp() {
                 ✕ Clear
               </button>
             )}
-            <button
-              onClick={handleExport}
-              style={{
-                padding: '10px 16px',
-                border: '1px solid #ddd',
-                borderRadius: '8px',
-                background: 'white',
-                cursor: 'pointer',
-                fontSize: '13px'
-              }}
-            >
-              📥 Export CSV
-            </button>
+            {!isFree && (
+              <button
+                onClick={handleExport}
+                style={{
+                  padding: '10px 16px',
+                  border: '1px solid #ddd',
+                  borderRadius: '8px',
+                  background: 'white',
+                  cursor: 'pointer',
+                  fontSize: '13px'
+                }}
+              >
+                📥 Export CSV
+              </button>
+            )}
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '14px', whiteSpace: 'nowrap' }}>
               <input
                 type="checkbox"
@@ -550,13 +551,13 @@ function MainApp() {
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
 
-     <SettingsDrawer
+      <SettingsDrawer
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
         userProfile={userProfile}
         userId={session.user.id}
         userFeatures={userFeatures}
-      onProfileUpdate={handleProfileUpdate}
+        onProfileUpdate={handleProfileUpdate}
         onLogout={handleLogout}
       />
     </div>

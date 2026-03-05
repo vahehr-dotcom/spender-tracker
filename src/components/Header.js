@@ -19,18 +19,12 @@ export default function Header({
   const navigate = useNavigate()
 
   const getDisplayName = () => {
-    if (userProfile?.first_name) {
-      return userProfile.first_name
-    }
-    if (userProfile?.display_name) {
-      return userProfile.display_name
-    }
+    if (userProfile?.first_name) return userProfile.first_name
+    if (userProfile?.display_name) return userProfile.display_name
     return userEmail
   }
 
-  const getTitle = () => {
-    return userProfile?.title || null
-  }
+  const getTitle = () => userProfile?.title || null
 
   const getAvatarContent = () => {
     if (userProfile?.avatar_url) {
@@ -41,6 +35,8 @@ export default function Header({
   }
 
   const tier = userFeatures?.tier || 'free'
+  const isFree = tier === 'free'
+
   const tierConfig = {
     free: null,
     pro: { label: 'PRO', bg: 'rgba(16, 185, 129, 0.9)' },
@@ -184,33 +180,36 @@ export default function Header({
           </>
         )}
 
-        <button
-          onClick={onImport}
-          style={{
-            padding: '10px 15px',
-            background: '#10b981',
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer'
-          }}
-        >
-          📥 Import
-        </button>
-
-        <button
-          onClick={onExport}
-          style={{
-            padding: '10px 15px',
-            background: '#f59e0b',
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer'
-          }}
-        >
-          📤 Export
-        </button>
+        {!isFree && (
+          <>
+            <button
+              onClick={onImport}
+              style={{
+                padding: '10px 15px',
+                background: '#10b981',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              📥 Import
+            </button>
+            <button
+              onClick={onExport}
+              style={{
+                padding: '10px 15px',
+                background: '#f59e0b',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              📤 Export
+            </button>
+          </>
+        )}
       </div>
     </div>
   )
