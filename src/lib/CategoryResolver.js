@@ -1,8 +1,16 @@
 import { supabase } from '../supabaseClient'
 import ExpenseService from './ExpenseService'
 
-// Keywords that are gender-sensitive — these exist in both Barbershop and Hair & Beauty
-const GENDER_ROUTED_KEYWORDS = ['haircut', 'hair cut', 'trim', 'fantastic sams', 'supercuts', 'great clips']
+// Merchants and keywords that are gender-sensitive — NEVER cache these globally
+const GENDER_SENSITIVE_MERCHANTS = [
+  'great clips', 'supercuts', 'fantastic sams', 'sport clips', 'cost cutters',
+  'hair cuttery', 'flowbee', 'regis salon', 'mastercuts', 'pro cuts'
+]
+
+const GENDER_SENSITIVE_KEYWORDS = [
+  'haircut', 'hair cut', 'trim', 'barber', 'barbershop', 'salon', 'blowout',
+  'hair color', 'highlights', 'balayage', 'keratin', 'hair treatment'
+]
 
 class CategoryResolver {
 
@@ -15,6 +23,8 @@ class CategoryResolver {
       return { id: null, name: null, resolvedBy: 'fallback', confidence: 0 }
     }
 
+    const isGenderSensitive = CategoryResolver.isGenderSensitive(merchantKey, description, fullMessage)
+
     // Step 1: User's personal overrides (always wins)
     const override = await CategoryResolver.checkUserOverride(userId, merchantKey)
     if (override) {
@@ -25,20 +35,18 @@ class CategoryResolver {
       }
     }
 
-    // Step 2: Global merchant cache
-    const cached = await CategoryResolver.checkGlobalCache(merchantKey)
-    if (cached && cached.confidence >= 0.6) {
-      // If cached result is gender-sensitive, re-route based on gender
-      const rerouted = CategoryResolver.applyGenderRoute(cached.category_name, gender, categories)
-      if (rerouted) {
-        console.log('🏷️ [2/5] Global cache (gender-routed):', merchantKey, '→', rerouted.name)
-        return { id: rerouted.id, name: rerouted.name, resolvedBy: 'global_cache', confidence: cached.confidence }
+    // Step 2: Global merchant cache — SKIP for gender-sensitive merchants
+    if (!isGenderSensitive) {
+      const cached = await CategoryResolver.checkGlobalCache(merchantKey)
+      if (cached && cached.confidence >= 0.6) {
+        const cat = categories.find(c => c.name.toLowerCase() === cached.category_name.toLowerCase())
+        if (cat) {
+          console.log('🏷️ [2/5] Global cache:', merchantKey, '→', cat.name, `(${cached.confidence})`)
+          return { id: cat.id, name: cat.name, resolvedBy: 'global_cache', confidence: cached.confidence }
+        }
       }
-      const cat = categories.find(c => c.name.toLowerCase() === cached.category_name.toLowerCase())
-      if (cat) {
-        console.log('🏷️ [2/5] Global cache:', merchantKey, '→', cat.name, `(${cached.confidence})`)
-        return { id: cat.id, name: cat.name, resolvedBy: 'global_cache', confidence: cached.confidence }
-      }
+    } else {
+      console.log('⚧️ Gender-sensitive merchant detected — skipping global cache:', merchantKey)
     }
 
     // Step 3: Local keyword map (fast, free)
@@ -46,18 +54,21 @@ class CategoryResolver {
       `${merchant} ${description || ''} ${fullMessage || ''}`
     )
     if (keywordMatch) {
-      // Check if this is a gender-sensitive match and re-route
       const rerouted = CategoryResolver.applyGenderRoute(keywordMatch, gender, categories)
       if (rerouted) {
         console.log('🏷️ [3/5] Keyword map (gender-routed):', merchantKey, '→', rerouted.name)
-        CategoryResolver.updateGlobalCache(merchantKey, rerouted.name, 0.7).catch(() => {})
+        if (!isGenderSensitive) {
+          CategoryResolver.updateGlobalCache(merchantKey, rerouted.name, 0.7).catch(() => {})
+        }
         return { id: rerouted.id, name: rerouted.name, resolvedBy: 'keyword_map', confidence: 0.7 }
       }
       const cat = categories.find(c => c.name.toLowerCase() === keywordMatch.toLowerCase())
         || categories.find(c => c.name.toLowerCase().includes(keywordMatch.toLowerCase()))
       if (cat) {
         console.log('🏷️ [3/5] Keyword map:', merchantKey, '→', cat.name)
-        CategoryResolver.updateGlobalCache(merchantKey, cat.name, 0.7).catch(() => {})
+        if (!isGenderSensitive) {
+          CategoryResolver.updateGlobalCache(merchantKey, cat.name, 0.7).catch(() => {})
+        }
         return { id: cat.id, name: cat.name, resolvedBy: 'keyword_map', confidence: 0.7 }
       }
     }
@@ -68,23 +79,47 @@ class CategoryResolver {
       const rerouted = CategoryResolver.applyGenderRoute(aiResult, gender, categories)
       if (rerouted) {
         console.log('🏷️ [4/5] AI resolved (gender-routed):', merchantKey, '→', rerouted.name)
-        CategoryResolver.updateGlobalCache(merchantKey, rerouted.name, 0.8).catch(() => {})
+        if (!isGenderSensitive) {
+          CategoryResolver.updateGlobalCache(merchantKey, rerouted.name, 0.8).catch(() => {})
+        }
         return { id: rerouted.id, name: rerouted.name, resolvedBy: 'ai', confidence: 0.8 }
       }
       const cat = categories.find(c => c.name.toLowerCase() === aiResult.toLowerCase())
         || categories.find(c => c.name.toLowerCase().includes(aiResult.toLowerCase()))
       if (cat) {
         console.log('🏷️ [4/5] AI resolved:', merchantKey, '→', cat.name)
-        CategoryResolver.updateGlobalCache(merchantKey, cat.name, 0.8).catch(() => {})
+        if (!isGenderSensitive) {
+          CategoryResolver.updateGlobalCache(merchantKey, cat.name, 0.8).catch(() => {})
+        }
         return { id: cat.id, name: cat.name, resolvedBy: 'ai', confidence: 0.8 }
       }
     }
 
+    // Step 5: Gender-aware fallback — if we know it's hair-related, route by gender
+    if (isGenderSensitive && gender) {
+      const targetName = gender === 'male' ? 'Barbershop' : 'Hair & Beauty'
+      const cat = categories.find(c => c.name === targetName)
+      if (cat) {
+        console.log('🏷️ [5/5] Gender fallback:', merchantKey, '→', cat.name)
+        return { id: cat.id, name: cat.name, resolvedBy: 'gender_fallback', confidence: 0.6 }
+      }
+    }
+
     // Step 5: Fallback to Miscellaneous
-    const misc = categories.find(c => c.name === 'Miscellaneous')
-      || categories[0]
+    const misc = categories.find(c => c.name === 'Miscellaneous') || categories[0]
     console.log('🏷️ [5/5] Fallback:', merchantKey, '→', misc.name)
     return { id: misc.id, name: misc.name, resolvedBy: 'fallback', confidence: 0.1 }
+  }
+
+  // ============================================
+  // GENDER SENSITIVITY CHECK
+  // ============================================
+  static isGenderSensitive(merchantKey, description, fullMessage) {
+    const combined = `${merchantKey} ${description || ''} ${fullMessage || ''}`.toLowerCase()
+    return (
+      GENDER_SENSITIVE_MERCHANTS.some(m => combined.includes(m)) ||
+      GENDER_SENSITIVE_KEYWORDS.some(k => combined.includes(k))
+    )
   }
 
   // ============================================
@@ -94,17 +129,10 @@ class CategoryResolver {
     if (!gender) return null
     const lower = categoryName.toLowerCase()
 
-    const hairCategories = ['hair & beauty', 'barbershop']
-    if (!hairCategories.includes(lower)) return null
+    const hairCategories = ['hair & beauty', 'barbershop', 'personal expenses']
+    if (!hairCategories.some(h => lower.includes(h))) return null
 
-    let targetName
-    if (gender === 'male') {
-      targetName = 'Barbershop'
-    } else if (gender === 'female') {
-      targetName = 'Hair & Beauty'
-    } else {
-      return null
-    }
+    const targetName = gender === 'male' ? 'Barbershop' : 'Hair & Beauty'
 
     if (lower === targetName.toLowerCase()) return null
 
@@ -233,7 +261,10 @@ class CategoryResolver {
       console.error('❌ Override save failed:', err)
     }
 
-    await CategoryResolver.updateGlobalCache(merchantKey, categoryName, 0.9)
+    // Only update global cache if not gender-sensitive
+    if (!CategoryResolver.isGenderSensitive(merchantKey, null, null)) {
+      await CategoryResolver.updateGlobalCache(merchantKey, categoryName, 0.9)
+    }
   }
 
   // ============================================
