@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import subscriptionManager from '../lib/SubscriptionManager'
+import AnalyticsDashboard from './AnalyticsDashboard'
 
-export default function AdminPanel({ onClose }) {
+export default function AdminPanel() {
   const [users, setUsers] = useState([])
   const [pendingUsers, setPendingUsers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -17,13 +18,24 @@ export default function AdminPanel({ onClose }) {
   const [newNotes, setNewNotes] = useState('')
   const [adding, setAdding] = useState(false)
   const [sendingInvite, setSendingInvite] = useState(null)
-
   const [guestDays, setGuestDays] = useState({})
+
+  // Login History state
+  const [sessions, setSessions] = useState([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [filterEmail, setFilterEmail] = useState('')
+  const [timeRange, setTimeRange] = useState('all')
 
   useEffect(() => {
     loadUsers()
     loadPendingUsers()
   }, [])
+
+  useEffect(() => {
+    if (activeTab === 'login-history') {
+      fetchSessions()
+    }
+  }, [activeTab, timeRange])
 
   const loadUsers = async () => {
     setLoading(true)
@@ -75,6 +87,33 @@ export default function AdminPanel({ onClose }) {
     }
   }
 
+  const fetchSessions = async () => {
+    setSessionsLoading(true)
+    try {
+      let query = supabase
+        .from('user_sessions')
+        .select('*')
+        .order('session_start', { ascending: false })
+
+      if (timeRange !== 'all') {
+        const now = new Date()
+        let cutoff
+        if (timeRange === '24h') cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+        else if (timeRange === '7d') cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+        else if (timeRange === '30d') cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+        query = query.gte('session_start', cutoff.toISOString())
+      }
+
+      query = query.limit(100)
+      const { data, error } = await query
+      if (error) throw error
+      setSessions(data || [])
+    } catch (err) {
+      console.error('Fetch sessions error:', err)
+    }
+    setSessionsLoading(false)
+  }
+
   const changeRole = async (userId, newRole) => {
     setUpdating(userId + '-role')
     try {
@@ -84,7 +123,6 @@ export default function AdminPanel({ onClose }) {
         .eq('id', userId)
 
       if (error) throw error
-
       setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u))
     } catch (err) {
       console.error('Change role error:', err)
@@ -107,17 +145,9 @@ export default function AdminPanel({ onClose }) {
         .eq('user_id', userId)
 
       if (error) throw error
-
       subscriptionManager.clearCache(userId)
-
       setUsers(users.map(u =>
-        u.id === userId ? {
-          ...u,
-          tier: newTier,
-          subscription_status: newTier === 'free' ? 'free' : 'active',
-          guest_granted_tier: null,
-          subscription_expires_at: null
-        } : u
+        u.id === userId ? { ...u, tier: newTier, subscription_status: newTier === 'free' ? 'free' : 'active', guest_granted_tier: null, subscription_expires_at: null } : u
       ))
     } catch (err) {
       console.error('Change tier error:', err)
@@ -127,10 +157,7 @@ export default function AdminPanel({ onClose }) {
   }
 
   const grantGuestAccess = async (userId, grantedTier, days) => {
-    if (!days || days < 1) {
-      alert('Please enter number of days')
-      return
-    }
+    if (!days || days < 1) { alert('Please enter number of days'); return }
     setUpdating(userId + '-guest')
     try {
       const expiresAt = new Date()
@@ -138,26 +165,13 @@ export default function AdminPanel({ onClose }) {
 
       const { error } = await supabase
         .from('user_subscriptions')
-        .update({
-          tier: 'guest',
-          subscription_status: 'active',
-          guest_granted_tier: grantedTier,
-          subscription_expires_at: expiresAt.toISOString()
-        })
+        .update({ tier: 'guest', subscription_status: 'active', guest_granted_tier: grantedTier, subscription_expires_at: expiresAt.toISOString() })
         .eq('user_id', userId)
 
       if (error) throw error
-
       subscriptionManager.clearCache(userId)
-
       setUsers(users.map(u =>
-        u.id === userId ? {
-          ...u,
-          tier: 'guest',
-          subscription_status: 'active',
-          guest_granted_tier: grantedTier,
-          subscription_expires_at: expiresAt.toISOString()
-        } : u
+        u.id === userId ? { ...u, tier: 'guest', subscription_status: 'active', guest_granted_tier: grantedTier, subscription_expires_at: expiresAt.toISOString() } : u
       ))
     } catch (err) {
       console.error('Grant guest error:', err)
@@ -172,26 +186,13 @@ export default function AdminPanel({ onClose }) {
     try {
       const { error } = await supabase
         .from('user_subscriptions')
-        .update({
-          tier: 'free',
-          subscription_status: 'free',
-          guest_granted_tier: null,
-          subscription_expires_at: null
-        })
+        .update({ tier: 'free', subscription_status: 'free', guest_granted_tier: null, subscription_expires_at: null })
         .eq('user_id', userId)
 
       if (error) throw error
-
       subscriptionManager.clearCache(userId)
-
       setUsers(users.map(u =>
-        u.id === userId ? {
-          ...u,
-          tier: 'free',
-          subscription_status: 'free',
-          guest_granted_tier: null,
-          subscription_expires_at: null
-        } : u
+        u.id === userId ? { ...u, tier: 'free', subscription_status: 'free', guest_granted_tier: null, subscription_expires_at: null } : u
       ))
     } catch (err) {
       console.error('Revoke access error:', err)
@@ -206,14 +207,7 @@ export default function AdminPanel({ onClose }) {
     try {
       await supabase
         .from('user_subscriptions')
-        .update({
-          tier: 'free',
-          subscription_status: 'free',
-          guest_granted_tier: null,
-          subscription_expires_at: null,
-          trial_end: null,
-          trial_used: true
-        })
+        .update({ tier: 'free', subscription_status: 'free', guest_granted_tier: null, subscription_expires_at: null, trial_end: null, trial_used: true })
         .eq('user_id', userId)
 
       await supabase
@@ -222,18 +216,8 @@ export default function AdminPanel({ onClose }) {
         .eq('id', userId)
 
       subscriptionManager.clearCache(userId)
-
       setUsers(users.map(u =>
-        u.id === userId ? {
-          ...u,
-          tier: 'free',
-          subscription_status: 'free',
-          guest_granted_tier: null,
-          subscription_expires_at: null,
-          trial_end: null,
-          trial_used: true,
-          is_banned: false
-        } : u
+        u.id === userId ? { ...u, tier: 'free', subscription_status: 'free', guest_granted_tier: null, subscription_expires_at: null, trial_end: null, trial_used: true, is_banned: false } : u
       ))
     } catch (err) {
       console.error('Deactivate error:', err)
@@ -253,10 +237,7 @@ export default function AdminPanel({ onClose }) {
         .eq('id', userId)
 
       if (error) throw error
-
-      setUsers(users.map(u =>
-        u.id === userId ? { ...u, is_banned: !currentlyBanned } : u
-      ))
+      setUsers(users.map(u => u.id === userId ? { ...u, is_banned: !currentlyBanned } : u))
     } catch (err) {
       console.error('Ban toggle error:', err)
       alert('Failed to update ban status')
@@ -265,35 +246,18 @@ export default function AdminPanel({ onClose }) {
   }
 
   const addPendingUser = async () => {
-    if (!newEmail.trim()) {
-      alert('Please enter an email')
-      return
-    }
-
+    if (!newEmail.trim()) { alert('Please enter an email'); return }
     setAdding(true)
     try {
       const { error } = await supabase
         .from('pending_users')
-        .insert({
-          email: newEmail.trim().toLowerCase(),
-          name: newName.trim() || null,
-          role: newRole,
-          is_pro: newIsPro,
-          notes: newNotes.trim() || null
-        })
+        .insert({ email: newEmail.trim().toLowerCase(), name: newName.trim() || null, role: newRole, is_pro: newIsPro, notes: newNotes.trim() || null })
 
       if (error) {
-        if (error.code === '23505') {
-          alert('This email is already in the pending list')
-        } else {
-          throw error
-        }
+        if (error.code === '23505') alert('This email is already in the pending list')
+        else throw error
       } else {
-        setNewEmail('')
-        setNewName('')
-        setNewRole('user')
-        setNewIsPro(false)
-        setNewNotes('')
+        setNewEmail(''); setNewName(''); setNewRole('user'); setNewIsPro(false); setNewNotes('')
         await loadPendingUsers()
       }
     } catch (err) {
@@ -306,11 +270,7 @@ export default function AdminPanel({ onClose }) {
   const deletePendingUser = async (id) => {
     if (!window.confirm('Remove this pending user?')) return
     try {
-      const { error } = await supabase
-        .from('pending_users')
-        .delete()
-        .eq('id', id)
-
+      const { error } = await supabase.from('pending_users').delete().eq('id', id)
       if (error) throw error
       setPendingUsers(pendingUsers.filter(u => u.id !== id))
     } catch (err) {
@@ -322,16 +282,9 @@ export default function AdminPanel({ onClose }) {
   const updatePendingUser = async (id, field, value) => {
     setUpdating(id + '-' + field)
     try {
-      const { error } = await supabase
-        .from('pending_users')
-        .update({ [field]: value })
-        .eq('id', id)
-
+      const { error } = await supabase.from('pending_users').update({ [field]: value }).eq('id', id)
       if (error) throw error
-
-      setPendingUsers(pendingUsers.map(u =>
-        u.id === id ? { ...u, [field]: value } : u
-      ))
+      setPendingUsers(pendingUsers.map(u => u.id === id ? { ...u, [field]: value } : u))
     } catch (err) {
       console.error('Update pending user error:', err)
       alert('Failed to update pending user')
@@ -345,24 +298,15 @@ export default function AdminPanel({ onClose }) {
       const response = await fetch('/api/send-invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: user.email,
-          name: user.name || null,
-          role: user.role,
-          isPro: user.is_pro
-        })
+        body: JSON.stringify({ email: user.email, name: user.name || null, role: user.role, isPro: user.is_pro })
       })
 
       const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to send invite')
-      }
+      if (!response.ok) throw new Error(data.error || 'Failed to send invite')
 
       setPendingUsers(pendingUsers.map(u =>
         u.id === user.id ? { ...u, invite_sent: true, invite_sent_at: new Date().toISOString() } : u
       ))
-
       alert('Invite sent!')
     } catch (err) {
       console.error('Send invite error:', err)
@@ -374,20 +318,15 @@ export default function AdminPanel({ onClose }) {
   const filteredUsers = users.filter(user => {
     if (!searchTerm) return true
     const search = searchTerm.toLowerCase()
-    return (
-      user.email?.toLowerCase().includes(search) ||
-      user.first_name?.toLowerCase().includes(search) ||
-      user.last_name?.toLowerCase().includes(search)
-    )
+    return user.email?.toLowerCase().includes(search) || user.first_name?.toLowerCase().includes(search) || user.last_name?.toLowerCase().includes(search)
   })
 
   const filteredPending = pendingUsers.filter(user => {
     if (!searchTerm) return true
-    return (
-      user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.name?.toLowerCase().includes(searchTerm.toLowerCase())
-    )
+    return user.email?.toLowerCase().includes(searchTerm.toLowerCase()) || user.name?.toLowerCase().includes(searchTerm.toLowerCase())
   })
+
+  const filteredSessions = sessions.filter(s => !filterEmail || s.email?.toLowerCase().includes(filterEmail.toLowerCase()))
 
   const getTierBadge = (user) => {
     const tier = user.tier || 'free'
@@ -434,63 +373,73 @@ export default function AdminPanel({ onClose }) {
 
   const formatDate = (dateStr) => {
     if (!dateStr) return ''
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   }
 
+  const formatDuration = (seconds) => {
+    if (!seconds) return 'Active'
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    return `${hours}h ${minutes}m`
+  }
+
+  const getDeviceName = (userAgent) => {
+    if (!userAgent || typeof userAgent !== 'string') return 'Unknown'
+    if (userAgent.includes('Win')) return 'Windows'
+    if (userAgent.includes('Mac')) return 'Mac'
+    if (userAgent.includes('Linux')) return 'Linux'
+    if (userAgent.includes('iPhone') || userAgent.includes('iPad')) return 'iOS'
+    if (userAgent.includes('Android')) return 'Android'
+    return 'Unknown'
+  }
+
+  const getBrowserName = (userAgent) => {
+    if (!userAgent || typeof userAgent !== 'string') return 'Unknown'
+    if (userAgent.includes('Edg')) return 'Edge'
+    if (userAgent.includes('Chrome')) return 'Chrome'
+    if (userAgent.includes('Firefox')) return 'Firefox'
+    if (userAgent.includes('Safari')) return 'Safari'
+    return 'Unknown'
+  }
+
+  const tabs = [
+    { id: 'users', label: `👥 Users (${users.length})` },
+    { id: 'subscriptions', label: '💳 Subscriptions' },
+    { id: 'pending', label: `⏳ Pending (${pendingUsers.length})` },
+    { id: 'analytics', label: '📊 Analytics' },
+    { id: 'login-history', label: '📋 Login History' }
+  ]
+
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0, left: 0, right: 0, bottom: 0,
-      background: 'rgba(0,0,0,0.7)',
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      zIndex: 1000,
-      padding: '20px'
-    }}>
-      <div style={{
-        background: 'white',
-        borderRadius: '16px',
-        padding: '30px',
-        maxWidth: '1200px',
-        width: '100%',
-        maxHeight: '85vh',
-        overflow: 'hidden',
-        display: 'flex',
-        flexDirection: 'column'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2 style={{ margin: 0, fontSize: '24px' }}>👑 Admin Panel</h2>
+    <div style={{ background: 'white', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 40px rgba(0,0,0,0.1)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+        <h2 style={{ margin: 0, fontSize: '28px' }}>👑 Admin Panel</h2>
+        <button
+          onClick={loadUsers}
+          style={{ padding: '8px 16px', background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+        >
+          🔄 Refresh
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', flexWrap: 'wrap' }}>
+        {tabs.map(tab => (
           <button
-            onClick={onClose}
-            style={{ padding: '8px 16px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              padding: '10px 20px',
+              background: activeTab === tab.id ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#e5e7eb',
+              color: activeTab === tab.id ? 'white' : '#6b7280',
+              border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold'
+            }}
           >
-            ✕ Close
+            {tab.label}
           </button>
-        </div>
+        ))}
+      </div>
 
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-          {['users', 'subscriptions', 'pending'].map(tab => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              style={{
-                padding: '10px 20px',
-                background: activeTab === tab ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#e5e7eb',
-                color: activeTab === tab ? 'white' : '#6b7280',
-                border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold'
-              }}
-            >
-              {tab === 'users' ? `👥 Active Users (${users.length})` : tab === 'subscriptions' ? '💳 Subscriptions' : `⏳ Pending Invites (${pendingUsers.length})`}
-            </button>
-          ))}
-        </div>
-
+      {activeTab !== 'analytics' && activeTab !== 'login-history' && (
         <input
           type="text"
           placeholder="Search by email or name..."
@@ -498,354 +447,368 @@ export default function AdminPanel({ onClose }) {
           onChange={(e) => setSearchTerm(e.target.value)}
           style={{ padding: '12px 16px', fontSize: '16px', border: '2px solid #e5e7eb', borderRadius: '8px', marginBottom: '20px', width: '100%', boxSizing: 'border-box' }}
         />
+      )}
 
-        {activeTab === 'users' && (
-          <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
-            {loading ? (
-              <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>Loading users...</div>
-            ) : filteredUsers.length === 0 ? (
-              <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>No users found</div>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: '#f3f4f6' }}>
-                    <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>User</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Email</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Role</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Tier</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Status</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredUsers.map(user => {
-                    const roleBadge = getRoleBadge(user.role)
-                    const tierBadge = getTierBadge(user)
-                    return (
-                      <tr key={user.id} style={{ borderBottom: '1px solid #e5e7eb', background: user.is_banned ? '#fef2f2' : 'white' }}>
-                        <td style={{ padding: '12px 16px' }}>
-                          <strong>{user.first_name} {user.last_name}</strong>
-                          {user.gender && <span style={{ fontSize: '11px', color: '#9ca3af', marginLeft: '6px' }}>({user.gender})</span>}
-                          {user.is_banned && <span style={{ fontSize: '11px', color: '#ef4444', marginLeft: '6px', fontWeight: 'bold' }}>🚫 BANNED</span>}
-                        </td>
-                        <td style={{ padding: '12px 16px', color: '#6b7280' }}>{user.email}</td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <span style={{ padding: '4px 12px', background: roleBadge.bg, color: roleBadge.textColor || 'white', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold' }}>
-                            {roleBadge.label}
-                          </span>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <span style={{ padding: '4px 12px', background: tierBadge.bg, color: tierBadge.textColor || 'white', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold' }}>
-                            {tierBadge.label}
-                          </span>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <select
-                            value={user.role || 'user'}
-                            onChange={(e) => changeRole(user.id, e.target.value)}
-                            disabled={updating === user.id + '-role'}
-                            style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px', cursor: 'pointer', background: 'white' }}
+      {activeTab === 'users' && (
+        <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflowX: 'auto' }}>
+          {loading ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>Loading users...</div>
+          ) : filteredUsers.length === 0 ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>No users found</div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: '#f3f4f6' }}>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>User</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Email</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Role</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Tier</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Change Role</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredUsers.map(user => {
+                  const roleBadge = getRoleBadge(user.role)
+                  const tierBadge = getTierBadge(user)
+                  return (
+                    <tr key={user.id} style={{ borderBottom: '1px solid #e5e7eb', background: user.is_banned ? '#fef2f2' : 'white' }}>
+                      <td style={{ padding: '12px 16px' }}>
+                        <strong>{user.first_name} {user.last_name}</strong>
+                        {user.gender && <span style={{ fontSize: '11px', color: '#9ca3af', marginLeft: '6px' }}>({user.gender})</span>}
+                        {user.is_banned && <span style={{ fontSize: '11px', color: '#ef4444', marginLeft: '6px', fontWeight: 'bold' }}>🚫 BANNED</span>}
+                      </td>
+                      <td style={{ padding: '12px 16px', color: '#6b7280' }}>{user.email}</td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <span style={{ padding: '4px 12px', background: roleBadge.bg, color: roleBadge.textColor || 'white', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold' }}>
+                          {roleBadge.label}
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <span style={{ padding: '4px 12px', background: tierBadge.bg, color: tierBadge.textColor || 'white', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold' }}>
+                          {tierBadge.label}
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <select
+                          value={user.role || 'user'}
+                          onChange={(e) => changeRole(user.id, e.target.value)}
+                          disabled={updating === user.id + '-role'}
+                          style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px', cursor: 'pointer', background: 'white' }}
+                        >
+                          <option value="user">User</option>
+                          <option value="tester">Tester</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                          <button
+                            onClick={() => deactivateUser(user.id)}
+                            disabled={updating === user.id + '-deactivate'}
+                            style={{ padding: '5px 10px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
                           >
-                            <option value="user">User</option>
-                            <option value="tester">Tester</option>
-                            <option value="admin">Admin</option>
-                          </select>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
-                            <button
-                              onClick={() => deactivateUser(user.id)}
-                              disabled={updating === user.id + '-deactivate'}
-                              style={{ padding: '5px 10px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
-                            >
-                              🔄 Deactivate
-                            </button>
-                            <button
-                              onClick={() => toggleBan(user.id, user.is_banned)}
-                              disabled={updating === user.id + '-ban'}
-                              style={{ padding: '5px 10px', background: user.is_banned ? '#10b981' : '#ef4444', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
-                            >
-                              {user.is_banned ? '✅ Unban' : '🚫 Ban'}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
+                            🔄 Deactivate
+                          </button>
+                          <button
+                            onClick={() => toggleBan(user.id, user.is_banned)}
+                            disabled={updating === user.id + '-ban'}
+                            style={{ padding: '5px 10px', background: user.is_banned ? '#10b981' : '#ef4444', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                          >
+                            {user.is_banned ? '✅ Unban' : '🚫 Ban'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
-        {activeTab === 'subscriptions' && (
-          <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
-            {loading ? (
-              <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>Loading...</div>
-            ) : filteredUsers.length === 0 ? (
-              <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>No users found</div>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: '#f3f4f6' }}>
-                    <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>User</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Current Tier</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Status</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Change Tier</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Guest Access</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredUsers.map(user => {
-                    const tierBadge = getTierBadge(user)
-                    const trialInfo = getTrialInfo(user)
-                    const expirationInfo = getExpirationInfo(user)
-                    return (
-                      <tr key={user.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                        <td style={{ padding: '12px 16px' }}>
-                          <strong>{user.first_name} {user.last_name}</strong>
-                          <div style={{ fontSize: '12px', color: '#9ca3af' }}>{user.email}</div>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <span style={{ padding: '4px 12px', background: tierBadge.bg, color: tierBadge.textColor || 'white', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold', display: 'inline-block' }}>
-                            {tierBadge.label}
+      {activeTab === 'subscriptions' && (
+        <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflowX: 'auto' }}>
+          {loading ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>Loading...</div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: '#f3f4f6' }}>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>User</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Current Tier</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Status</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Change Tier</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Guest Access</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredUsers.map(user => {
+                  const tierBadge = getTierBadge(user)
+                  const trialInfo = getTrialInfo(user)
+                  const expirationInfo = getExpirationInfo(user)
+                  return (
+                    <tr key={user.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                      <td style={{ padding: '12px 16px' }}>
+                        <strong>{user.first_name} {user.last_name}</strong>
+                        <div style={{ fontSize: '12px', color: '#9ca3af' }}>{user.email}</div>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <span style={{ padding: '4px 12px', background: tierBadge.bg, color: tierBadge.textColor || 'white', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold', display: 'inline-block' }}>
+                          {tierBadge.label}
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <div style={{ fontSize: '12px' }}>
+                          <span style={{ color: user.subscription_status === 'active' ? '#10b981' : user.subscription_status === 'trial' ? '#f59e0b' : '#6b7280' }}>
+                            {user.subscription_status || 'free'}
                           </span>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <div style={{ fontSize: '12px' }}>
-                            <span style={{ color: user.subscription_status === 'active' ? '#10b981' : user.subscription_status === 'trial' ? '#f59e0b' : '#6b7280' }}>
-                              {user.subscription_status || 'free'}
-                            </span>
-                            {trialInfo && (
-                              <div style={{ fontSize: '11px', color: trialInfo.status === 'active' ? '#f59e0b' : trialInfo.status === 'expired' ? '#ef4444' : '#9ca3af', marginTop: '2px' }}>
-                                {trialInfo.label}
-                              </div>
-                            )}
-                            {expirationInfo && (
-                              <div style={{ fontSize: '11px', color: expirationInfo === 'Expired' ? '#ef4444' : '#8b5cf6', marginTop: '2px' }}>
-                                {expirationInfo}
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <select
-                            value={user.tier || 'free'}
-                            onChange={(e) => changeTier(user.id, e.target.value)}
-                            disabled={updating === user.id + '-tier'}
-                            style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px', cursor: 'pointer', background: 'white' }}
-                          >
-                            <option value="free">Free</option>
-                            <option value="pro">PRO</option>
-                            <option value="max">MAX</option>
-                            <option value="tester">Tester</option>
-                            <option value="admin">Admin</option>
-                          </select>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <div style={{ display: 'flex', gap: '4px', alignItems: 'center', justifyContent: 'center' }}>
-                            <input
-                              type="number"
-                              min="1"
-                              max="365"
-                              placeholder="Days"
-                              value={guestDays[user.id] || ''}
-                              onChange={(e) => setGuestDays({ ...guestDays, [user.id]: e.target.value })}
-                              style={{ width: '60px', padding: '6px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '12px', textAlign: 'center' }}
-                            />
-                            <button
-                              onClick={() => grantGuestAccess(user.id, 'pro', guestDays[user.id])}
-                              disabled={updating === user.id + '-guest' || !guestDays[user.id]}
-                              style={{ padding: '6px 8px', background: !guestDays[user.id] ? '#e5e7eb' : 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)', color: !guestDays[user.id] ? '#9ca3af' : 'white', border: 'none', borderRadius: '6px', cursor: !guestDays[user.id] ? 'not-allowed' : 'pointer', fontSize: '11px', fontWeight: 'bold' }}
-                            >
-                              PRO
-                            </button>
-                            <button
-                              onClick={() => grantGuestAccess(user.id, 'max', guestDays[user.id])}
-                              disabled={updating === user.id + '-guest' || !guestDays[user.id]}
-                              style={{ padding: '6px 8px', background: !guestDays[user.id] ? '#e5e7eb' : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', color: !guestDays[user.id] ? '#9ca3af' : 'white', border: 'none', borderRadius: '6px', cursor: !guestDays[user.id] ? 'not-allowed' : 'pointer', fontSize: '11px', fontWeight: 'bold' }}
-                            >
-                              MAX
-                            </button>
-                          </div>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          {user.tier !== 'free' && user.tier !== 'admin' && (
-                            <button
-                              onClick={() => revokeAccess(user.id)}
-                              disabled={updating === user.id + '-revoke'}
-                              style={{ padding: '6px 12px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold', opacity: updating === user.id + '-revoke' ? 0.6 : 1 }}
-                            >
-                              Revoke
-                            </button>
+                          {trialInfo && (
+                            <div style={{ fontSize: '11px', color: trialInfo.status === 'active' ? '#f59e0b' : trialInfo.status === 'expired' ? '#ef4444' : '#9ca3af', marginTop: '2px' }}>
+                              {trialInfo.label}
+                            </div>
                           )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
+                          {expirationInfo && (
+                            <div style={{ fontSize: '11px', color: expirationInfo === 'Expired' ? '#ef4444' : '#8b5cf6', marginTop: '2px' }}>
+                              {expirationInfo}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <select
+                          value={user.tier || 'free'}
+                          onChange={(e) => changeTier(user.id, e.target.value)}
+                          disabled={updating === user.id + '-tier'}
+                          style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px', cursor: 'pointer', background: 'white' }}
+                        >
+                          <option value="free">Free</option>
+                          <option value="pro">PRO</option>
+                          <option value="max">MAX</option>
+                          <option value="tester">Tester</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <div style={{ display: 'flex', gap: '4px', alignItems: 'center', justifyContent: 'center' }}>
+                          <input
+                            type="number" min="1" max="365" placeholder="Days"
+                            value={guestDays[user.id] || ''}
+                            onChange={(e) => setGuestDays({ ...guestDays, [user.id]: e.target.value })}
+                            style={{ width: '60px', padding: '6px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '12px', textAlign: 'center' }}
+                          />
+                          <button
+                            onClick={() => grantGuestAccess(user.id, 'pro', guestDays[user.id])}
+                            disabled={updating === user.id + '-guest' || !guestDays[user.id]}
+                            style={{ padding: '6px 8px', background: !guestDays[user.id] ? '#e5e7eb' : 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)', color: !guestDays[user.id] ? '#9ca3af' : 'white', border: 'none', borderRadius: '6px', cursor: !guestDays[user.id] ? 'not-allowed' : 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                          >PRO</button>
+                          <button
+                            onClick={() => grantGuestAccess(user.id, 'max', guestDays[user.id])}
+                            disabled={updating === user.id + '-guest' || !guestDays[user.id]}
+                            style={{ padding: '6px 8px', background: !guestDays[user.id] ? '#e5e7eb' : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', color: !guestDays[user.id] ? '#9ca3af' : 'white', border: 'none', borderRadius: '6px', cursor: !guestDays[user.id] ? 'not-allowed' : 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                          >MAX</button>
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        {user.tier !== 'free' && user.tier !== 'admin' && (
+                          <button
+                            onClick={() => revokeAccess(user.id)}
+                            disabled={updating === user.id + '-revoke'}
+                            style={{ padding: '6px 12px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold', opacity: updating === user.id + '-revoke' ? 0.6 : 1 }}
+                          >
+                            Revoke
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
-        {activeTab === 'pending' && (
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            <div style={{ padding: '20px', background: '#f3f4f6', borderRadius: '8px', marginBottom: '20px' }}>
-              <h3 style={{ margin: '0 0 15px 0', fontSize: '16px' }}>➕ Pre-register New User</h3>
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                <div style={{ flex: '1', minWidth: '200px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#6b7280' }}>Email</label>
-                  <input
-                    type="email"
-                    value={newEmail}
-                    onChange={(e) => setNewEmail(e.target.value)}
-                    placeholder="user@example.com"
-                    style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
-                  />
-                </div>
-                <div style={{ flex: '1', minWidth: '150px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#6b7280' }}>Name (optional)</label>
-                  <input
-                    type="text"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    placeholder="First name"
-                    style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
-                  />
-                </div>
-                <div style={{ minWidth: '120px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#6b7280' }}>Role</label>
-                  <select
-                    value={newRole}
-                    onChange={(e) => setNewRole(e.target.value)}
-                    style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px' }}
-                  >
-                    <option value="user">User</option>
-                    <option value="tester">Tester</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                </div>
-                <div style={{ minWidth: '100px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#6b7280' }}>PRO</label>
-                  <button
-                    onClick={() => setNewIsPro(!newIsPro)}
-                    style={{ width: '100%', padding: '10px', border: 'none', borderRadius: '6px', fontSize: '14px', cursor: 'pointer', background: newIsPro ? '#10b981' : '#e5e7eb', color: newIsPro ? 'white' : '#6b7280', fontWeight: 'bold' }}
-                  >
-                    {newIsPro ? '✓ PRO' : 'Basic'}
-                  </button>
-                </div>
-                <div style={{ flex: '1', minWidth: '150px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#6b7280' }}>Notes (optional)</label>
-                  <input
-                    type="text"
-                    value={newNotes}
-                    onChange={(e) => setNewNotes(e.target.value)}
-                    placeholder="e.g., Beta tester"
-                    style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
-                  />
-                </div>
-                <button
-                  onClick={addPendingUser}
-                  disabled={adding}
-                  style={{ padding: '10px 20px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', border: 'none', borderRadius: '6px', cursor: adding ? 'not-allowed' : 'pointer', fontWeight: 'bold', opacity: adding ? 0.6 : 1 }}
-                >
-                  {adding ? 'Adding...' : 'Add User'}
+      {activeTab === 'pending' && (
+        <div>
+          <div style={{ padding: '20px', background: '#f3f4f6', borderRadius: '8px', marginBottom: '20px' }}>
+            <h3 style={{ margin: '0 0 15px 0', fontSize: '16px' }}>➕ Pre-register New User</h3>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div style={{ flex: '1', minWidth: '180px' }}>
+                <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#6b7280' }}>Email</label>
+                <input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="user@example.com"
+                  style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ flex: '1', minWidth: '140px' }}>
+                <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#6b7280' }}>Name (optional)</label>
+                <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="First name"
+                  style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ minWidth: '120px' }}>
+                <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#6b7280' }}>Role</label>
+                <select value={newRole} onChange={(e) => setNewRole(e.target.value)}
+                  style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px' }}>
+                  <option value="user">User</option>
+                  <option value="tester">Tester</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <div style={{ minWidth: '100px' }}>
+                <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#6b7280' }}>PRO</label>
+                <button onClick={() => setNewIsPro(!newIsPro)}
+                  style={{ width: '100%', padding: '10px', border: 'none', borderRadius: '6px', fontSize: '14px', cursor: 'pointer', background: newIsPro ? '#10b981' : '#e5e7eb', color: newIsPro ? 'white' : '#6b7280', fontWeight: 'bold' }}>
+                  {newIsPro ? '✓ PRO' : 'Basic'}
                 </button>
               </div>
-              <p style={{ margin: '10px 0 0 0', fontSize: '12px', color: '#6b7280' }}>
-                When this user signs up, they'll automatically get the role and PRO status you set here.
-              </p>
-            </div>
-
-            <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px' }}>
-              {filteredPending.length === 0 ? (
-                <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>No pending users. Add one above!</div>
-              ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ background: '#f3f4f6' }}>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Email</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Name</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Role</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>PRO</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Notes</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Invite Status</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredPending.map(user => (
-                      <tr key={user.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                        <td style={{ padding: '12px 16px', fontWeight: '500' }}>{user.email}</td>
-                        <td style={{ padding: '12px 16px', color: '#6b7280', fontSize: '13px' }}>{user.name || '-'}</td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <select
-                            value={user.role || 'user'}
-                            onChange={(e) => updatePendingUser(user.id, 'role', e.target.value)}
-                            disabled={updating === user.id + '-role'}
-                            style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px', cursor: 'pointer', background: 'white' }}
-                          >
-                            <option value="user">User</option>
-                            <option value="tester">Tester</option>
-                            <option value="admin">Admin</option>
-                          </select>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <button
-                            onClick={() => updatePendingUser(user.id, 'is_pro', !user.is_pro)}
-                            disabled={updating === user.id + '-is_pro'}
-                            style={{ padding: '4px 12px', background: user.is_pro ? '#10b981' : '#e5e7eb', color: user.is_pro ? 'white' : '#6b7280', border: 'none', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}
-                          >
-                            {user.is_pro ? '✓ PRO' : 'Basic'}
-                          </button>
-                        </td>
-                        <td style={{ padding: '12px 16px', color: '#6b7280', fontSize: '13px' }}>{user.notes || '-'}</td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          {user.invite_sent ? (
-                            <span style={{ fontSize: '12px', color: '#10b981' }}>✓ Sent {formatDate(user.invite_sent_at)}</span>
-                          ) : (
-                            <span style={{ fontSize: '12px', color: '#6b7280' }}>Not sent</span>
-                          )}
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
-                            <button
-                              onClick={() => sendInvite(user)}
-                              disabled={sendingInvite === user.id}
-                              style={{ padding: '6px 12px', background: user.invite_sent ? '#6b7280' : 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', color: 'white', border: 'none', borderRadius: '6px', cursor: sendingInvite === user.id ? 'not-allowed' : 'pointer', fontSize: '12px', fontWeight: 'bold', opacity: sendingInvite === user.id ? 0.6 : 1 }}
-                            >
-                              {sendingInvite === user.id ? 'Sending...' : user.invite_sent ? 'Resend' : '📧 Send Invite'}
-                            </button>
-                            <button
-                              onClick={() => deletePendingUser(user.id)}
-                              style={{ padding: '6px 12px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+              <div style={{ flex: '1', minWidth: '140px' }}>
+                <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: '#6b7280' }}>Notes (optional)</label>
+                <input type="text" value={newNotes} onChange={(e) => setNewNotes(e.target.value)} placeholder="e.g., Beta tester"
+                  style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }} />
+              </div>
+              <button onClick={addPendingUser} disabled={adding}
+                style={{ padding: '10px 20px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', border: 'none', borderRadius: '6px', cursor: adding ? 'not-allowed' : 'pointer', fontWeight: 'bold', opacity: adding ? 0.6 : 1 }}>
+                {adding ? 'Adding...' : 'Add User'}
+              </button>
             </div>
           </div>
-        )}
 
-        <div style={{ marginTop: '20px', padding: '12px', background: '#f3f4f6', borderRadius: '8px', fontSize: '14px', color: '#6b7280', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-          <span>Total: {users.length}</span>
-          <span>Free: {users.filter(u => u.tier === 'free').length}</span>
-          <span>PRO: {users.filter(u => u.tier === 'pro').length}</span>
-          <span>MAX: {users.filter(u => u.tier === 'max').length}</span>
-          <span>Guests: {users.filter(u => u.tier === 'guest').length}</span>
-          <span>Testers: {users.filter(u => u.tier === 'tester').length}</span>
-          <span>Admins: {users.filter(u => u.tier === 'admin').length}</span>
-          <span>Banned: {users.filter(u => u.is_banned).length}</span>
-          <span>Pending: {pendingUsers.length}</span>
+          <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflowX: 'auto' }}>
+            {filteredPending.length === 0 ? (
+              <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>No pending users.</div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#f3f4f6' }}>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Email</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Name</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Role</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>PRO</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Notes</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Invite Status</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid #e5e7eb' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPending.map(user => (
+                    <tr key={user.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                      <td style={{ padding: '12px 16px', fontWeight: '500' }}>{user.email}</td>
+                      <td style={{ padding: '12px 16px', color: '#6b7280', fontSize: '13px' }}>{user.name || '-'}</td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <select value={user.role || 'user'} onChange={(e) => updatePendingUser(user.id, 'role', e.target.value)} disabled={updating === user.id + '-role'}
+                          style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px', cursor: 'pointer', background: 'white' }}>
+                          <option value="user">User</option>
+                          <option value="tester">Tester</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <button onClick={() => updatePendingUser(user.id, 'is_pro', !user.is_pro)} disabled={updating === user.id + '-is_pro'}
+                          style={{ padding: '4px 12px', background: user.is_pro ? '#10b981' : '#e5e7eb', color: user.is_pro ? 'white' : '#6b7280', border: 'none', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
+                          {user.is_pro ? '✓ PRO' : 'Basic'}
+                        </button>
+                      </td>
+                      <td style={{ padding: '12px 16px', color: '#6b7280', fontSize: '13px' }}>{user.notes || '-'}</td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        {user.invite_sent
+                          ? <span style={{ fontSize: '12px', color: '#10b981' }}>✓ Sent {formatDate(user.invite_sent_at)}</span>
+                          : <span style={{ fontSize: '12px', color: '#6b7280' }}>Not sent</span>}
+                      </td>
+                      <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                          <button onClick={() => sendInvite(user)} disabled={sendingInvite === user.id}
+                            style={{ padding: '6px 12px', background: user.invite_sent ? '#6b7280' : 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', color: 'white', border: 'none', borderRadius: '6px', cursor: sendingInvite === user.id ? 'not-allowed' : 'pointer', fontSize: '12px', fontWeight: 'bold', opacity: sendingInvite === user.id ? 0.6 : 1 }}>
+                            {sendingInvite === user.id ? 'Sending...' : user.invite_sent ? 'Resend' : '📧 Send Invite'}
+                          </button>
+                          <button onClick={() => deletePendingUser(user.id)}
+                            style={{ padding: '6px 12px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}>
+                            Remove
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
+      )}
+
+      {activeTab === 'analytics' && <AnalyticsDashboard />}
+
+      {activeTab === 'login-history' && (
+        <div>
+          <div style={{ marginBottom: '20px', display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              type="text" placeholder="Filter by email" value={filterEmail}
+              onChange={(e) => setFilterEmail(e.target.value)}
+              style={{ padding: '10px 14px', border: '2px solid #e5e7eb', borderRadius: '8px', width: '250px' }}
+            />
+            <select value={timeRange} onChange={(e) => setTimeRange(e.target.value)}
+              style={{ padding: '10px 14px', border: '2px solid #e5e7eb', borderRadius: '8px' }}>
+              <option value="all">All Time</option>
+              <option value="24h">Last 24 Hours</option>
+              <option value="7d">Last 7 Days</option>
+              <option value="30d">Last 30 Days</option>
+            </select>
+            <button onClick={fetchSessions}
+              style={{ padding: '10px 16px', background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
+              🔄 Refresh
+            </button>
+            <span style={{ marginLeft: 'auto', color: '#6b7280', fontSize: '14px' }}>{filteredSessions.length} session(s)</span>
+          </div>
+
+          {sessionsLoading ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>Loading sessions...</div>
+          ) : filteredSessions.length === 0 ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>No sessions found</div>
+          ) : (
+            <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#f3f4f6' }}>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Email</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Device</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Browser</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Login Time</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Duration</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSessions.map(log => (
+                    <tr key={log.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                      <td style={{ padding: '12px 16px', fontWeight: 'bold' }}>{log.email || 'Unknown'}</td>
+                      <td style={{ padding: '12px 16px' }}>{getDeviceName(log.device_info)}</td>
+                      <td style={{ padding: '12px 16px' }}>{getBrowserName(log.device_info)}</td>
+                      <td style={{ padding: '12px 16px' }}>{formatDate(log.session_start)}</td>
+                      <td style={{ padding: '12px 16px' }}>{formatDuration(log.duration_seconds)}</td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '12px', background: log.session_end ? '#d4edda' : '#fff3cd', color: log.session_end ? '#155724' : '#856404' }}>
+                          {log.session_end ? 'Ended' : 'Active'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ marginTop: '24px', padding: '12px', background: '#f3f4f6', borderRadius: '8px', fontSize: '14px', color: '#6b7280', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+        <span>Total: {users.length}</span>
+        <span>Free: {users.filter(u => u.tier === 'free').length}</span>
+        <span>PRO: {users.filter(u => u.tier === 'pro').length}</span>
+        <span>MAX: {users.filter(u => u.tier === 'max').length}</span>
+        <span>Guests: {users.filter(u => u.tier === 'guest').length}</span>
+        <span>Testers: {users.filter(u => u.tier === 'tester').length}</span>
+        <span>Admins: {users.filter(u => u.tier === 'admin').length}</span>
+        <span>Banned: {users.filter(u => u.is_banned).length}</span>
+        <span>Pending: {pendingUsers.length}</span>
       </div>
     </div>
   )

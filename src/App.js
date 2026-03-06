@@ -12,22 +12,25 @@ import FileImport from './components/FileImport'
 import ImportPreview from './components/ImportPreview'
 import UpgradeModal from './components/UpgradeModal'
 import AdminPanel from './components/AdminPanel'
-import AnalyticsDashboard from './components/AnalyticsDashboard'
 import SettingsDrawer from './components/SettingsDrawer'
-import LoginHistoryPage from './pages/LoginHistoryPage'
 
 import { useAuth, useUserData, useExpenses } from './hooks'
 import ExpenseService from './lib/ExpenseService'
 import subscriptionManager from './lib/SubscriptionManager'
 
-const AnalyticsPage = () => {
+const AdminPage = () => {
   const navigate = useNavigate()
   return (
-    <div style={{ padding: '20px' }}>
-      <button onClick={() => navigate('/')} style={{ marginBottom: '20px', padding: '10px 20px', cursor: 'pointer' }}>
-        ← Back to Dashboard
-      </button>
-      <AnalyticsDashboard />
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', padding: '20px' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+        <button
+          onClick={() => navigate('/')}
+          style={{ marginBottom: '20px', padding: '10px 20px', cursor: 'pointer', background: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold' }}
+        >
+          ← Back to Dashboard
+        </button>
+        <AdminPanel />
+      </div>
     </div>
   )
 }
@@ -71,7 +74,6 @@ function MainApp() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [showUpgrade, setShowUpgrade] = useState(false)
-  const [showAdmin, setShowAdmin] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [parsedTransactions, setParsedTransactions] = useState([])
   const [searchInput, setSearchInput] = useState('')
@@ -302,7 +304,6 @@ function MainApp() {
             onExport={handleExport}
             onLogout={handleLogout}
             onUpgrade={() => setShowUpgrade(true)}
-            onOpenAdmin={() => setShowAdmin(true)}
             onOpenSettings={() => setShowSettings(true)}
             userFeatures={userFeatures}
           />
@@ -512,10 +513,7 @@ function MainApp() {
       {showImport && (
         <div style={{
           position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
+          top: 0, left: 0, right: 0, bottom: 0,
           background: 'rgba(0,0,0,0.7)',
           display: 'flex',
           justifyContent: 'center',
@@ -549,7 +547,6 @@ function MainApp() {
       )}
 
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} />}
-      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
 
       <SettingsDrawer
         isOpen={showSettings}
@@ -569,8 +566,7 @@ function App() {
     <Router>
       <Routes>
         <Route path="/" element={<MainApp />} />
-        <Route path="/login-history" element={<LoginHistoryPage />} />
-        <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route path="/admin" element={<AdminPage />} />
       </Routes>
     </Router>
   )

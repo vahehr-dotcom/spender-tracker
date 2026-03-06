@@ -12,7 +12,6 @@ export default function Header({
   onExport,
   onLogout,
   onUpgrade,
-  onOpenAdmin,
   onOpenSettings,
   userFeatures
 }) {
@@ -136,48 +135,20 @@ export default function Header({
         )}
 
         {isAdmin && (
-          <>
-            <button
-              onClick={onOpenAdmin}
-              style={{
-                padding: '10px 15px',
-                background: 'linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
-              }}
-            >
-              👑 Admin
-            </button>
-            <button
-              onClick={() => navigate('/login-history')}
-              style={{
-                padding: '10px 15px',
-                background: '#3b82f6',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer'
-              }}
-            >
-              📊 Login History
-            </button>
-            <button
-              onClick={() => navigate('/analytics')}
-              style={{
-                padding: '10px 15px',
-                background: '#8b5cf6',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer'
-              }}
-            >
-              📈 Analytics
-            </button>
-          </>
+          <button
+            onClick={() => navigate('/admin')}
+            style={{
+              padding: '10px 15px',
+              background: 'linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            👑 Admin
+          </button>
         )}
 
         {!isFree && (
