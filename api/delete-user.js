@@ -17,17 +17,34 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    // Delete all app data in order
-    await supabase.from('user_activities').delete().eq('user_id', userId)
-    await supabase.from('user_sessions').delete().eq('user_id', userId)
-    await supabase.from('page_views').delete().eq('user_id', userId)
-    await supabase.from('user_preferences').delete().eq('user_id', userId)
-    await supabase.from('user_subscriptions').delete().eq('user_id', userId)
-    await supabase.from('expenses').delete().eq('user_id', userId)
-    await supabase.from('budgets').delete().eq('user_id', userId)
-    await supabase.from('user_profiles').delete().eq('id', userId)
+    const tables = [
+      'user_activities',
+      'user_sessions',
+      'page_views',
+      'user_preferences',
+      'user_subscriptions',
+      'daily_usage',
+      'conversations',
+      'expenses',
+      'budget_goals',
+      'categories',
+      'categorization_log',
+      'login_logs',
+      'merchants',
+      'proactive_notifications',
+      'spending_patterns',
+      'subscriptions',
+      'subscriptions_detected',
+      'user_category_overrides',
+      'user_insights',
+      'user_profiles'
+    ]
 
-    // Delete from Supabase Auth - full wipe
+    for (const table of tables) {
+      const col = table === 'user_profiles' ? 'id' : 'user_id'
+      await supabase.from(table).delete().eq(col, userId)
+    }
+
     const { error: authError } = await supabase.auth.admin.deleteUser(userId)
     if (authError) throw authError
 
