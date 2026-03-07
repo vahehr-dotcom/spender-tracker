@@ -355,7 +355,7 @@ export default function AdminPanel() {
   }
 
   const getDeviceName = (userAgent) => {
-    if (!userAgent) return 'Unknown'
+    if (!userAgent || typeof userAgent !== 'string') return 'Unknown'
     if (userAgent.includes('Win')) return 'Windows'
     if (userAgent.includes('Mac')) return 'Mac'
     if (userAgent.includes('iPhone') || userAgent.includes('iPad')) return 'iOS'
@@ -364,7 +364,7 @@ export default function AdminPanel() {
   }
 
   const getBrowserName = (userAgent) => {
-    if (!userAgent) return 'Unknown'
+    if (!userAgent || typeof userAgent !== 'string') return 'Unknown'
     if (userAgent.includes('Edg')) return 'Edge'
     if (userAgent.includes('Chrome')) return 'Chrome'
     if (userAgent.includes('Firefox')) return 'Firefox'
