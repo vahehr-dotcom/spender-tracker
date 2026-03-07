@@ -58,17 +58,11 @@ export function useAuth() {
   const handleLogin = async (email, password) => {
     try {
       setLoginStatus('Logging in...')
-      
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      })
-
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) {
         setLoginStatus(`Error: ${error.message}`)
         return { success: false, error: error.message }
       }
-
       setSession(data.session)
       setLoginStatus('Login successful!')
       return { success: true }
@@ -103,7 +97,7 @@ export function useAuth() {
     hasLoggedRef.current = false
     sessionIdRef.current = null
     sessionStartRef.current = null
-    
+
     await supabase.auth.signOut()
     setSession(null)
   }
@@ -112,16 +106,40 @@ export function useAuth() {
     if (sessionIdRef.current) return
 
     try {
-     const { data: existingSessions } = await supabase
+      // Close any stale open sessions older than 1 hour
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+      const { data: staleSessions } = await supabase
+        .from('user_sessions')
+        .select('id, session_start, last_activity')
+        .eq('user_id', userId)
+        .is('session_end', null)
+
+      for (const stale of (staleSessions || [])) {
+        const lastActive = new Date(stale.last_activity || stale.session_start)
+        if (lastActive < new Date(oneHourAgo)) {
+          const duration = Math.floor((lastActive - new Date(stale.session_start)) / 1000)
+          await supabase
+            .from('user_sessions')
+            .update({
+              session_end: lastActive.toISOString(),
+              duration_seconds: duration
+            })
+            .eq('id', stale.id)
+        }
+      }
+
+      // Check for a recent active session (within last hour)
+      const { data: recentSessions } = await supabase
         .from('user_sessions')
         .select('id')
         .eq('user_id', userId)
         .is('session_end', null)
+        .gte('last_activity', oneHourAgo)
 
-      const existingSession = existingSessions?.[0] || null
+      const recentSession = recentSessions?.[0] || null
 
-      if (existingSession) {
-        sessionIdRef.current = existingSession.id
+      if (recentSession) {
+        sessionIdRef.current = recentSession.id
         sessionStartRef.current = Date.now()
       } else {
         const { data: newSession, error } = await supabase
@@ -145,10 +163,7 @@ export function useAuth() {
         sessionStartRef.current = Date.now()
       }
 
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-      }
-
+      if (intervalRef.current) clearInterval(intervalRef.current)
       intervalRef.current = setInterval(() => {
         updateSessionActivity()
       }, 30000)
@@ -160,7 +175,6 @@ export function useAuth() {
 
   const updateSessionActivity = async () => {
     if (!sessionIdRef.current) return
-
     try {
       await supabase
         .from('user_sessions')
@@ -174,7 +188,6 @@ export function useAuth() {
   const logLogin = async (email) => {
     if (hasLoggedRef.current) return
     hasLoggedRef.current = true
-
     try {
       await supabase.from('login_logs').insert({
         email: email,
