@@ -29,23 +29,12 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
   const onAICommandRef = useRef(onAICommand)
   const onReloadExpensesRef = useRef(onReloadExpenses)
 
-  useEffect(() => {
-    onAICommandRef.current = onAICommand
-  }, [onAICommand])
+  useEffect(() => { onAICommandRef.current = onAICommand }, [onAICommand])
+  useEffect(() => { onReloadExpensesRef.current = onReloadExpenses }, [onReloadExpenses])
+  useEffect(() => { expensesRef.current = expenses; categoriesRef.current = categories }, [expenses, categories])
 
   useEffect(() => {
-    onReloadExpensesRef.current = onReloadExpenses
-  }, [onReloadExpenses])
-
-  useEffect(() => {
-    expensesRef.current = expenses
-    categoriesRef.current = categories
-  }, [expenses, categories])
-
-  useEffect(() => {
-    if (agentRef.current) {
-      agentRef.current.isProMode = isProMode
-    }
+    if (agentRef.current) agentRef.current.isProMode = isProMode
   }, [isProMode])
 
   useEffect(() => {
@@ -65,33 +54,19 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
 
       const tools = {
         reload_expenses: async () => {
-          if (onReloadExpensesRef.current) {
-            await onReloadExpensesRef.current()
-          }
+          if (onReloadExpensesRef.current) await onReloadExpensesRef.current()
         },
         search: async (params) => {
-          try {
-            const result = await onAICommandRef.current({ action: 'search', data: { term: params.query } })
-            return result
-          } catch (error) {
-            return { success: false, error: error.message }
-          }
+          try { return await onAICommandRef.current({ action: 'search', data: { term: params.query } }) }
+          catch (error) { return { success: false, error: error.message } }
         },
         export: async () => {
-          try {
-            const result = await onAICommandRef.current({ action: 'export', data: {} })
-            return result
-          } catch (error) {
-            return { success: false, error: error.message }
-          }
+          try { return await onAICommandRef.current({ action: 'export', data: {} }) }
+          catch (error) { return { success: false, error: error.message } }
         },
         update_expense: async (params) => {
-          try {
-            const result = await onAICommandRef.current({ action: 'update_expense', data: params })
-            return result
-          } catch (error) {
-            return { success: false, error: error.message }
-          }
+          try { return await onAICommandRef.current({ action: 'update_expense', data: params }) }
+          catch (error) { return { success: false, error: error.message } }
         }
       }
 
@@ -106,10 +81,7 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
           .eq('user_id', userId)
           .eq('preference_type', 'voice_greeting')
           .single()
-
-        if (!error && data) {
-          setVoiceGreetingEnabled(data.preference_value === 'true')
-        }
+        if (!error && data) setVoiceGreetingEnabled(data.preference_value === 'true')
       } catch (err) {
         console.log('Voice greeting preference not found, defaulting to enabled')
       }
@@ -141,21 +113,19 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
       greeting = `Hey there! Good to see you.`
     }
 
-  console.log('👋 Greeting:', greeting)
-setLastResponse(greeting)
-// Only speak if user has already interacted with the page
-if (document.hasFocus() && document.visibilityState === 'visible') {
-  const trySpeak = () => {
-    speak(greeting)
-    document.removeEventListener('click', trySpeak)
-    document.removeEventListener('keydown', trySpeak)
-  }
-  document.addEventListener('click', trySpeak, { once: true })
-  document.addEventListener('keydown', trySpeak, { once: true })
-} else {
-  setTimeout(() => speak(greeting), 1000)
-}
-
+    console.log('👋 Greeting:', greeting)
+    setLastResponse(greeting)
+    if (document.hasFocus() && document.visibilityState === 'visible') {
+      const trySpeak = () => {
+        speak(greeting)
+        document.removeEventListener('click', trySpeak)
+        document.removeEventListener('keydown', trySpeak)
+      }
+      document.addEventListener('click', trySpeak, { once: true })
+      document.addEventListener('keydown', trySpeak, { once: true })
+    } else {
+      setTimeout(() => speak(greeting), 1000)
+    }
   }, [userId, userProfile, isInitialized, hasGreeted, voiceGreetingEnabled])
 
   useEffect(() => {
@@ -185,27 +155,17 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
         setIsListening(false)
       }
 
-      recognitionRef.current.onend = () => {
-        setIsListening(false)
-      }
+      recognitionRef.current.onend = () => setIsListening(false)
     }
 
     return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop()
-      }
-      if (audioRef.current) {
-        audioRef.current.pause()
-      }
+      if (recognitionRef.current) recognitionRef.current.stop()
+      if (audioRef.current) audioRef.current.pause()
     }
   }, [])
 
   const startListening = () => {
-    if (!isProMode) {
-      onUpgradeToPro()
-      return
-    }
-
+    if (!isProMode) { onUpgradeToPro(); return }
     if (recognitionRef.current && !isListening) {
       recognitionRef.current.start()
       setIsListening(true)
@@ -221,6 +181,7 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
   }
 
   const speak = async (text) => {
+    if (!isProMode) return
     try {
       const ttsCheck = await subscriptionManager.canUse(userId, 'tts')
       if (!ttsCheck.allowed) {
@@ -229,7 +190,6 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
       }
 
       setIsSpeaking(true)
-
       const cleanText = text.replace(/[*#_~`>]/g, '').replace(/\n{2,}/g, '. ').replace(/\n/g, '. ').trim()
 
       const response = await fetch('/api/tts', {
@@ -240,17 +200,9 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
 
       const audioBlob = await response.blob()
       const audioUrl = URL.createObjectURL(audioBlob)
-
       audioRef.current = new Audio(audioUrl)
-      audioRef.current.onended = () => {
-        setIsSpeaking(false)
-        URL.revokeObjectURL(audioUrl)
-      }
-      audioRef.current.onerror = () => {
-        setIsSpeaking(false)
-        URL.revokeObjectURL(audioUrl)
-      }
-
+      audioRef.current.onended = () => { setIsSpeaking(false); URL.revokeObjectURL(audioUrl) }
+      audioRef.current.onerror = () => { setIsSpeaking(false); URL.revokeObjectURL(audioUrl) }
       await audioRef.current.play()
       await subscriptionManager.incrementUsage(userId, 'tts_count')
     } catch (err) {
@@ -260,32 +212,22 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
   }
 
   const stopSpeaking = () => {
-    if (audioRef.current) {
-      audioRef.current.pause()
-      audioRef.current.currentTime = 0
-    }
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0 }
     setIsSpeaking(false)
   }
 
   const clearChat = () => {
     if (window.confirm('Clear conversation history?')) {
-      if (memoryRef.current) {
-        memoryRef.current.clearSession()
-      }
+      if (memoryRef.current) memoryRef.current.clearSession()
       setLastResponse('')
       setLastUserMessage('')
     }
   }
 
   const toggleVoiceGreeting = async () => {
-    if (!isProMode) {
-      onUpgradeToPro()
-      return
-    }
-
+    if (!isProMode) { onUpgradeToPro(); return }
     const newValue = !voiceGreetingEnabled
     setVoiceGreetingEnabled(newValue)
-
     try {
       await supabase.from('user_preferences').upsert({
         user_id: userId,
@@ -293,7 +235,6 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
         preference_value: newValue.toString(),
         set_at: new Date().toISOString()
       }, { onConflict: 'user_id,preference_type' })
-
       const confirmMessage = newValue ? 'Voice greeting has been turned on.' : 'Voice greeting has been turned off.'
       setLastResponse(confirmMessage)
       if (newValue) speak(confirmMessage)
@@ -303,10 +244,7 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
   }
 
   const handleAISubmit = async (overrideMessage) => {
-    if (!isInitialized) {
-      setLastResponse('⚠️ Nova is initializing... please wait.')
-      return
-    }
+    if (!isInitialized) { setLastResponse('⚠️ Nova is initializing... please wait.'); return }
 
     const userMessage = overrideMessage || aiInput.trim()
     if (!userMessage) return
@@ -322,25 +260,20 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
     setLastUserMessage(userMessage)
 
     try {
-      if (!overrideMessage) {
-        memoryRef.current.addMessage('user', userMessage)
-      }
-
+      if (!overrideMessage) memoryRef.current.addMessage('user', userMessage)
       await subscriptionManager.incrementUsage(userId, 'message_count')
 
       let response = ''
-
       const expenseData = { expenses: expensesRef.current, categories: categoriesRef.current }
-      
+      const tier = userFeatures?.tier || 'free'
+
       if (agentRef.current) {
         agentRef.current.isProMode = isProMode
-        if (userFeatures?.tier) agentRef.current.userTier = userFeatures.tier
+        agentRef.current.userTier = tier
       }
 
-      const tier = userFeatures?.tier || 'free'
-      const canAddExpenses = tier !== 'free'
-
-      if (canAddExpenses && agentRef.current) {
+      // Always run agent first — it handles both free and paid users
+      if (agentRef.current) {
         const agentResult = await agentRef.current.detectAndExecute(userMessage, expenseData)
 
         if (agentResult.handled) {
@@ -350,6 +283,7 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
             await subscriptionManager.incrementUsage(userId, 'ai_parse_count')
           }
         } else {
+          // Not an expense command — send to GPT
           const systemPrompt = await agentRef.current.buildSystemPrompt(expenseData)
           const messages = agentRef.current.buildMessages(systemPrompt, userMessage)
           const apiResponse = await fetch('/api/chat', {
@@ -358,47 +292,30 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
             body: JSON.stringify({ messages })
           })
           const data = await apiResponse.json()
-          if (data.choices && data.choices[0]) {
-            response = data.choices[0].message.content
-          } else {
-            response = '⚠️ Nova is having trouble connecting right now. Please try again in a moment.'
-          }
+          response = data.choices?.[0]?.message?.content || '⚠️ Nova is having trouble connecting right now. Please try again in a moment.'
         }
       } else {
-        const systemPrompt = agentRef.current 
-          ? await agentRef.current.buildSystemPrompt(expenseData)
-          : `You are Nova, a friendly AI assistant for expense tracking. Be helpful and concise.${memoryRef.current.buildMemoryContext()}`
-        const messages = agentRef.current
-          ? agentRef.current.buildMessages(systemPrompt, userMessage)
-          : [
-              { role: 'system', content: systemPrompt },
-              ...memoryRef.current.getConversationHistory().map(msg => ({ role: msg.role, content: msg.content })),
-              { role: 'user', content: userMessage }
-            ]
         const apiResponse = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages })
+          body: JSON.stringify({
+            messages: [
+              { role: 'system', content: `You are Nova, a friendly AI assistant for expense tracking. Be helpful and concise.` },
+              { role: 'user', content: userMessage }
+            ]
+          })
         })
         const data = await apiResponse.json()
-        if (data.choices && data.choices[0]) {
-          response = data.choices[0].message.content
-        } else {
-          response = '⚠️ Nova is having trouble connecting right now. Please try again in a moment.'
-        }
+        response = data.choices?.[0]?.message?.content || '⚠️ Nova is having trouble connecting right now.'
       }
 
       setLastResponse(response)
 
-      if (!overrideMessage) {
-        memoryRef.current.addMessage('assistant', response)
-      }
+      if (!overrideMessage) memoryRef.current.addMessage('assistant', response)
 
-      if (canAddExpenses) {
-        speak(response)
-      }
+      if (isProMode) speak(response)
 
-      if (canAddExpenses) {
+      if (tier !== 'free') {
         await memoryRef.current.saveConversation('user', userMessage)
         await memoryRef.current.saveConversation('assistant', response)
         await memoryRef.current.learnFromConversation(userMessage, response)
@@ -413,9 +330,7 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
   }
 
   const handleRegenerate = () => {
-    if (lastUserMessage && !isThinking) {
-      handleAISubmit(lastUserMessage)
-    }
+    if (lastUserMessage && !isThinking) handleAISubmit(lastUserMessage)
   }
 
   const nickname = userProfile?.first_name || 'friend'
@@ -447,35 +362,29 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
           {isProMode && (
-            <button
-              onClick={toggleVoiceGreeting}
-              style={{
-                padding: '8px 12px',
-                background: voiceGreetingEnabled ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
-                border: '2px solid rgba(255,255,255,0.5)',
-                borderRadius: '8px',
-                color: 'white',
-                cursor: 'pointer',
-                fontSize: '12px',
-                fontWeight: 'bold'
-              }}
-            >
+            <button onClick={toggleVoiceGreeting} style={{
+              padding: '8px 12px',
+              background: voiceGreetingEnabled ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
+              border: '2px solid rgba(255,255,255,0.5)',
+              borderRadius: '8px',
+              color: 'white',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 'bold'
+            }}>
               🔊 Voice Greeting {voiceGreetingEnabled ? 'ON' : 'OFF'}
             </button>
           )}
           {memoryRef.current && memoryRef.current.sessionMessages.length > 0 && (
-            <button
-              onClick={clearChat}
-              style={{
-                padding: '8px 12px',
-                background: 'rgba(239, 68, 68, 0.3)',
-                border: '2px solid rgba(255,255,255,0.5)',
-                borderRadius: '8px',
-                color: 'white',
-                cursor: 'pointer',
-                fontSize: '12px'
-              }}
-            >
+            <button onClick={clearChat} style={{
+              padding: '8px 12px',
+              background: 'rgba(239, 68, 68, 0.3)',
+              border: '2px solid rgba(255,255,255,0.5)',
+              borderRadius: '8px',
+              color: 'white',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}>
               🗑️ Clear Chat
             </button>
           )}
@@ -504,11 +413,7 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
               </div>
               {onDismissNotification && (
                 <button onClick={() => onDismissNotification(idx)} style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'white',
-                  cursor: 'pointer',
-                  fontSize: '18px'
+                  background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', fontSize: '18px'
                 }}>×</button>
               )}
             </div>
@@ -525,45 +430,31 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
           placeholder={isProMode ? `Ask Nova anything, ${nickname}...` : `Chat with Nova, ${nickname}...`}
           disabled={isThinking || isListening}
           style={{
-            flex: 1,
-            padding: '12px',
+            flex: 1, padding: '12px',
             border: '2px solid rgba(255,255,255,0.3)',
             borderRadius: '8px',
             background: 'rgba(255,255,255,0.2)',
-            color: 'white',
-            fontSize: '14px'
+            color: 'white', fontSize: '14px'
           }}
         />
         {isProMode && (
-          <button
-            onClick={isListening ? stopListening : startListening}
-            disabled={isThinking}
-            style={{
-              padding: '12px 20px',
-              background: isListening ? '#ef4444' : 'rgba(255,255,255,0.3)',
-              border: '2px solid rgba(255,255,255,0.5)',
-              borderRadius: '8px',
-              color: 'white',
-              cursor: isThinking ? 'not-allowed' : 'pointer',
-              fontWeight: 'bold'
-            }}
-          >
+          <button onClick={isListening ? stopListening : startListening} disabled={isThinking} style={{
+            padding: '12px 20px',
+            background: isListening ? '#ef4444' : 'rgba(255,255,255,0.3)',
+            border: '2px solid rgba(255,255,255,0.5)',
+            borderRadius: '8px', color: 'white',
+            cursor: isThinking ? 'not-allowed' : 'pointer', fontWeight: 'bold'
+          }}>
             {isListening ? '🔴 Stop' : '🎤 Speak'}
           </button>
         )}
-        <button
-          onClick={() => handleAISubmit()}
-          disabled={isThinking || !aiInput.trim()}
-          style={{
-            padding: '12px 20px',
-            background: isThinking ? '#6b7280' : 'rgba(255,255,255,0.3)',
-            border: '2px solid rgba(255,255,255,0.5)',
-            borderRadius: '8px',
-            color: 'white',
-            cursor: isThinking || !aiInput.trim() ? 'not-allowed' : 'pointer',
-            fontWeight: 'bold'
-          }}
-        >
+        <button onClick={() => handleAISubmit()} disabled={isThinking || !aiInput.trim()} style={{
+          padding: '12px 20px',
+          background: isThinking ? '#6b7280' : 'rgba(255,255,255,0.3)',
+          border: '2px solid rgba(255,255,255,0.5)',
+          borderRadius: '8px', color: 'white',
+          cursor: isThinking || !aiInput.trim() ? 'not-allowed' : 'pointer', fontWeight: 'bold'
+        }}>
           {isThinking ? '⏳ Thinking...' : '✨ Ask'}
         </button>
       </div>
@@ -571,61 +462,42 @@ if (document.hasFocus() && document.visibilityState === 'visible') {
       {lastResponse && (
         <div style={{
           background: 'rgba(255,255,255,0.2)',
-          padding: '15px',
-          borderRadius: '8px',
-          marginTop: '15px'
+          padding: '15px', borderRadius: '8px', marginTop: '15px'
         }}>
           <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{lastResponse}</p>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
             {isProMode && (
-              <button
-                onClick={isSpeaking ? stopSpeaking : () => speak(lastResponse)}
-                disabled={isThinking}
-                style={{
-                  background: isSpeaking ? 'rgba(239, 68, 68, 0.4)' : 'rgba(255,255,255,0.15)',
-                  border: '1px solid rgba(255,255,255,0.3)',
-                  borderRadius: '6px',
-                  color: 'white',
-                  cursor: isThinking ? 'not-allowed' : 'pointer',
-                  padding: '5px 12px',
-                  fontSize: '13px'
-                }}
-              >
+              <button onClick={isSpeaking ? stopSpeaking : () => speak(lastResponse)} disabled={isThinking} style={{
+                background: isSpeaking ? 'rgba(239, 68, 68, 0.4)' : 'rgba(255,255,255,0.15)',
+                border: '1px solid rgba(255,255,255,0.3)',
+                borderRadius: '6px', color: 'white',
+                cursor: isThinking ? 'not-allowed' : 'pointer',
+                padding: '5px 12px', fontSize: '13px'
+              }}>
                 {isSpeaking ? '⏹️ Stop' : '🔊 Listen'}
               </button>
             )}
             {isProMode && lastUserMessage && (
-              <button
-                onClick={handleRegenerate}
-                disabled={isThinking}
-                style={{
-                  background: 'rgba(255,255,255,0.15)',
-                  border: '1px solid rgba(255,255,255,0.3)',
-                  borderRadius: '6px',
-                  color: 'white',
-                  cursor: isThinking ? 'not-allowed' : 'pointer',
-                  padding: '5px 12px',
-                  fontSize: '13px'
-                }}
-              >
+              <button onClick={handleRegenerate} disabled={isThinking} style={{
+                background: 'rgba(255,255,255,0.15)',
+                border: '1px solid rgba(255,255,255,0.3)',
+                borderRadius: '6px', color: 'white',
+                cursor: isThinking ? 'not-allowed' : 'pointer',
+                padding: '5px 12px', fontSize: '13px'
+              }}>
                 🔄 Regenerate
               </button>
             )}
-            {isSpeaking && (
-              <span style={{ fontSize: '12px', opacity: 0.8 }}>Speaking...</span>
-            )}
+            {isSpeaking && <span style={{ fontSize: '12px', opacity: 0.8 }}>Speaking...</span>}
           </div>
         </div>
       )}
 
       {tier === 'free' && (
         <div style={{
-          marginTop: '15px',
-          padding: '12px',
+          marginTop: '15px', padding: '12px',
           background: 'rgba(255,255,255,0.2)',
-          borderRadius: '8px',
-          fontSize: '13px',
-          textAlign: 'center'
+          borderRadius: '8px', fontSize: '13px', textAlign: 'center'
         }}>
           💡 Upgrade to PRO for voice commands, memory, and advanced AI features!
         </div>
