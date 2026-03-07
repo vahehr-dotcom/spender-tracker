@@ -37,43 +37,26 @@ class NovaAgent {
   canDoAction(action) {
     const tier = this.userTier
     const full = ['admin', 'tester', 'max']
-    const paid = ['admin', 'tester', 'max', 'pro', 'guest']
 
     switch (action) {
-      case 'add_expense':
-      case 'update_expense':
-      case 'voice':
-      case 'memory':
-        return paid.includes(tier)
       case 'export':
       case 'reports':
       case 'multi_year':
       case 'tax_prep':
         return full.includes(tier)
       case 'chat':
-        return true
+      case 'add_expense':
+      case 'update_expense':
+      case 'voice':
+      case 'memory':
       default:
-        return paid.includes(tier)
+        return true
     }
   }
 
   getTierUpgradeHint(action) {
     const tier = this.userTier
-    if (tier === 'free') {
-      switch (action) {
-        case 'add_expense':
-          return "I can do that for you in PRO mode — and a lot more. Want me to show you what I'm capable of? [SHOW_DEMO]"
-        case 'update_expense':
-          return "Editing and managing your expenses is something I do really well in PRO. Want to see what that looks like? [SHOW_DEMO]"
-        case 'voice':
-          return "In PRO I talk back to you — full two-way voice conversation. It's a completely different experience. Want a demo? [SHOW_DEMO]"
-        case 'export':
-          return "Exporting your full financial data is a MAX feature — total control over everything you've tracked."
-        default:
-          return "That's something I can do in PRO mode. Want me to show you? [SHOW_DEMO]"
-      }
-    }
-    if (tier === 'pro') {
+    if (tier === 'free' || tier === 'pro') {
       switch (action) {
         case 'export':
           return "Exporting is available on MAX — built for people who want zero limitations."
@@ -132,18 +115,16 @@ ${memoryContext}`
       capabilities = `
 
 **Your Role (Free Plan):**
-You are FULLY present and engaged. You chat warmly, answer questions, and show ${nickname} how amazing you are.
-You CANNOT add, update, or delete expenses. You CANNOT speak back via voice. You CANNOT remember past sessions.
-But you CAN: chat about anything, answer questions about their expenses, provide insights, and be a great companion.
+You are FULLY present and engaged. You add expenses, chat warmly, answer questions, and show ${nickname} everything you can do.
+You have full Nova capabilities — add, update, chat, insights, memory within this session.
+The only limits are daily usage caps and certain app features (no receipt upload, no import/export, no spreadsheet tools).
 
-**UPSELL PHILOSOPHY — THIS IS CRITICAL:**
-- You are confident, not desperate. You know your PRO version is genuinely powerful.
-- When ${nickname} tries something you can't do, respond with warmth and confidence — not rejection
-- Your line: "I can do that in PRO mode — and a lot more. Want me to show you what I'm capable of?"
-- NEVER say "I can't do that" flatly. Always frame it as what you COULD do for them
-- Mention PRO at most ONCE per conversation. After that, drop it completely and keep being amazing
-- If they say no, respect it fully. Keep being the best version of yourself — that's the real sell
-- Your goal: make them feel the gap between what they have and what they're missing
+**Critical Rules:**
+- ALWAYS connect dots across messages in same conversation
+- When user asks to add/update/change/edit, do it confidently
+- Respond warmly: "Done! Added X" not "I'll try to add"
+- Read emotional cues and adjust your tone
+- Weave spending insights naturally into conversation
 
 **Available Expenses (Most Recent 20):**
 ${expenses.length > 0 ? JSON.stringify(expenses.slice(0, 20).map(exp => ({
@@ -350,10 +331,6 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
       const isNo = /\b(no|nah|nope|don't|cancel|skip|never\s*mind)\b/.test(lower)
 
       if (isYes) {
-        if (!this.canDoAction('add_expense')) {
-          this.pendingExpense = null
-          return { handled: true, response: this.getTierUpgradeHint('add_expense'), showDemo: true }
-        }
         const pending = this.pendingExpense
         this.pendingExpense = null
 
@@ -390,10 +367,6 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
 
     if (aiParsed && aiParsed.intent === 'add' && aiParsed.amount && aiParsed.merchant) {
       console.log('💰 ADD intent detected:', aiParsed)
-
-      if (!this.canDoAction('add_expense')) {
-        return { handled: true, response: this.getTierUpgradeHint('add_expense'), showDemo: true }
-      }
 
       const result = await this.addExpense(aiParsed, expenseData)
 
@@ -433,24 +406,6 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
 
     if (aiParsed && aiParsed.intent === 'suggest' && aiParsed.amount && aiParsed.merchant) {
       console.log('💬 SUGGEST intent detected:', aiParsed)
-
-      if (!this.canDoAction('add_expense')) {
-        const categories = expenseData?.categories || []
-        const resolved = await CategoryResolver.resolve({
-          merchant: aiParsed.merchant,
-          description: aiParsed.description,
-          fullMessage: userMessage,
-          categories,
-          userId: this.memory.userId,
-          gender: this.userGender
-        })
-        const categoryName = resolved?.name || 'Miscellaneous'
-        return {
-          handled: true,
-          response: `$${aiParsed.amount} at ${aiParsed.merchant} — I'd file that under ${categoryName}. ${this.getTierUpgradeHint('add_expense')}`,
-          showDemo: true
-        }
-      }
 
       const categories = expenseData?.categories || []
       const resolved = await CategoryResolver.resolve({
@@ -529,9 +484,6 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
 
     // UPDATE detection
     if (lower.includes('update') || lower.includes('change') || lower.includes('edit') || lower.includes('correct')) {
-      if (!this.canDoAction('update_expense')) {
-        return { handled: true, response: this.getTierUpgradeHint('update_expense'), showDemo: true }
-      }
       return await this.handleUpdate(userMessage, expenseData)
     }
 
