@@ -165,7 +165,6 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
   }, [])
 
   const startListening = () => {
-    if (!isProMode) { onUpgradeToPro(); return }
     if (recognitionRef.current && !isListening) {
       recognitionRef.current.start()
       setIsListening(true)
@@ -181,7 +180,6 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
   }
 
   const speak = async (text) => {
-    if (!isProMode) return
     try {
       const ttsCheck = await subscriptionManager.canUse(userId, 'tts')
       if (!ttsCheck.allowed) {
@@ -225,7 +223,6 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
   }
 
   const toggleVoiceGreeting = async () => {
-    if (!isProMode) { onUpgradeToPro(); return }
     const newValue = !voiceGreetingEnabled
     setVoiceGreetingEnabled(newValue)
     try {
@@ -272,18 +269,15 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
         agentRef.current.userTier = tier
       }
 
-      // Always run agent first — it handles both free and paid users
       if (agentRef.current) {
         const agentResult = await agentRef.current.detectAndExecute(userMessage, expenseData)
 
         if (agentResult.handled) {
           response = agentResult.response
-
           if (response.startsWith('✅ Added') || response.startsWith('✅ Done! Added')) {
             await subscriptionManager.incrementUsage(userId, 'ai_parse_count')
           }
         } else {
-          // Not an expense command — send to GPT
           const systemPrompt = await agentRef.current.buildSystemPrompt(expenseData)
           const messages = agentRef.current.buildMessages(systemPrompt, userMessage)
           const apiResponse = await fetch('/api/chat', {
@@ -313,7 +307,7 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
 
       if (!overrideMessage) memoryRef.current.addMessage('assistant', response)
 
-      if (isProMode) speak(response)
+      speak(response)
 
       if (tier !== 'free') {
         await memoryRef.current.saveConversation('user', userMessage)
@@ -361,20 +355,18 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
           )}
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
-          {isProMode && (
-            <button onClick={toggleVoiceGreeting} style={{
-              padding: '8px 12px',
-              background: voiceGreetingEnabled ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
-              border: '2px solid rgba(255,255,255,0.5)',
-              borderRadius: '8px',
-              color: 'white',
-              cursor: 'pointer',
-              fontSize: '12px',
-              fontWeight: 'bold'
-            }}>
-              🔊 Voice Greeting {voiceGreetingEnabled ? 'ON' : 'OFF'}
-            </button>
-          )}
+          <button onClick={toggleVoiceGreeting} style={{
+            padding: '8px 12px',
+            background: voiceGreetingEnabled ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
+            border: '2px solid rgba(255,255,255,0.5)',
+            borderRadius: '8px',
+            color: 'white',
+            cursor: 'pointer',
+            fontSize: '12px',
+            fontWeight: 'bold'
+          }}>
+            🔊 Voice Greeting {voiceGreetingEnabled ? 'ON' : 'OFF'}
+          </button>
           {memoryRef.current && memoryRef.current.sessionMessages.length > 0 && (
             <button onClick={clearChat} style={{
               padding: '8px 12px',
@@ -391,7 +383,7 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
         </div>
       </div>
 
-      {isProMode && notifications && notifications.length > 0 && (
+      {notifications && notifications.length > 0 && (
         <div style={{ marginBottom: '15px' }}>
           {notifications.map((notif, idx) => (
             <div key={idx} style={{
@@ -427,7 +419,7 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
           value={aiInput}
           onChange={(e) => setAiInput(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && handleAISubmit()}
-          placeholder={isProMode ? `Ask Nova anything, ${nickname}...` : `Chat with Nova, ${nickname}...`}
+          placeholder={`Ask Nova anything, ${nickname}...`}
           disabled={isThinking || isListening}
           style={{
             flex: 1, padding: '12px',
@@ -437,17 +429,15 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
             color: 'white', fontSize: '14px'
           }}
         />
-        {isProMode && (
-          <button onClick={isListening ? stopListening : startListening} disabled={isThinking} style={{
-            padding: '12px 20px',
-            background: isListening ? '#ef4444' : 'rgba(255,255,255,0.3)',
-            border: '2px solid rgba(255,255,255,0.5)',
-            borderRadius: '8px', color: 'white',
-            cursor: isThinking ? 'not-allowed' : 'pointer', fontWeight: 'bold'
-          }}>
-            {isListening ? '🔴 Stop' : '🎤 Speak'}
-          </button>
-        )}
+        <button onClick={isListening ? stopListening : startListening} disabled={isThinking} style={{
+          padding: '12px 20px',
+          background: isListening ? '#ef4444' : 'rgba(255,255,255,0.3)',
+          border: '2px solid rgba(255,255,255,0.5)',
+          borderRadius: '8px', color: 'white',
+          cursor: isThinking ? 'not-allowed' : 'pointer', fontWeight: 'bold'
+        }}>
+          {isListening ? '🔴 Stop' : '🎤 Speak'}
+        </button>
         <button onClick={() => handleAISubmit()} disabled={isThinking || !aiInput.trim()} style={{
           padding: '12px 20px',
           background: isThinking ? '#6b7280' : 'rgba(255,255,255,0.3)',
@@ -466,18 +456,16 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
         }}>
           <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{lastResponse}</p>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
-            {isProMode && (
-              <button onClick={isSpeaking ? stopSpeaking : () => speak(lastResponse)} disabled={isThinking} style={{
-                background: isSpeaking ? 'rgba(239, 68, 68, 0.4)' : 'rgba(255,255,255,0.15)',
-                border: '1px solid rgba(255,255,255,0.3)',
-                borderRadius: '6px', color: 'white',
-                cursor: isThinking ? 'not-allowed' : 'pointer',
-                padding: '5px 12px', fontSize: '13px'
-              }}>
-                {isSpeaking ? '⏹️ Stop' : '🔊 Listen'}
-              </button>
-            )}
-            {isProMode && lastUserMessage && (
+            <button onClick={isSpeaking ? stopSpeaking : () => speak(lastResponse)} disabled={isThinking} style={{
+              background: isSpeaking ? 'rgba(239, 68, 68, 0.4)' : 'rgba(255,255,255,0.15)',
+              border: '1px solid rgba(255,255,255,0.3)',
+              borderRadius: '6px', color: 'white',
+              cursor: isThinking ? 'not-allowed' : 'pointer',
+              padding: '5px 12px', fontSize: '13px'
+            }}>
+              {isSpeaking ? '⏹️ Stop' : '🔊 Listen'}
+            </button>
+            {lastUserMessage && (
               <button onClick={handleRegenerate} disabled={isThinking} style={{
                 background: 'rgba(255,255,255,0.15)',
                 border: '1px solid rgba(255,255,255,0.3)',
@@ -499,7 +487,7 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
           background: 'rgba(255,255,255,0.2)',
           borderRadius: '8px', fontSize: '13px', textAlign: 'center'
         }}>
-          💡 Upgrade to PRO for voice commands, memory, and advanced AI features!
+          💡 Upgrade to PRO to unlock memory, advanced insights, and more!
         </div>
       )}
     </div>
