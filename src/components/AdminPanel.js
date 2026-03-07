@@ -214,6 +214,25 @@ export default function AdminPanel() {
     setUpdating(null)
   }
 
+  const deleteUser = async (userId, userEmail) => {
+    if (!window.confirm(`PERMANENTLY DELETE ${userEmail}?\n\nThis wipes all data and cannot be undone.`)) return
+    if (!window.confirm('Are you absolutely sure? This is irreversible.')) return
+    setUpdating(userId + '-delete')
+    try {
+      const response = await fetch('/api/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId })
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Failed to delete user')
+      setUsers(users.filter(u => u.id !== userId))
+    } catch (err) {
+      alert('Failed to delete user: ' + err.message)
+    }
+    setUpdating(null)
+  }
+
   const addPendingUser = async () => {
     if (!newEmail.trim()) { alert('Please enter an email'); return }
     setAdding(true)
@@ -287,7 +306,7 @@ export default function AdminPanel() {
       case 'tester': return { bg: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', label: '🧪 Tester' }
       case 'max': return { bg: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', label: '⭐ MAX' }
       case 'pro': return { bg: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', label: '✓ PRO' }
-      case 'guest': return { bg: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)', label: `🎟️ Guest` }
+      case 'guest': return { bg: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)', label: '🎟️ Guest' }
       default: return { bg: '#e5e7eb', label: 'Free', textColor: '#6b7280' }
     }
   }
@@ -475,6 +494,10 @@ export default function AdminPanel() {
                           <button onClick={() => toggleBan(user.id, user.is_banned)} disabled={updating === user.id + '-ban'}
                             style={{ padding: '5px 10px', background: user.is_banned ? '#10b981' : '#ef4444', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>
                             {user.is_banned ? '✅ Unban' : '🚫 Ban'}
+                          </button>
+                          <button onClick={() => deleteUser(user.id, user.email)} disabled={updating === user.id + '-delete'}
+                            style={{ padding: '5px 10px', background: '#7f1d1d', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', opacity: updating === user.id + '-delete' ? 0.6 : 1 }}>
+                            🗑️ Delete
                           </button>
                         </div>
                       </td>
