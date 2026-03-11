@@ -188,7 +188,8 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
       }
 
       setIsSpeaking(true)
-      const cleanText = text.replace(/[*#_~`>]/g, '').replace(/\n{2,}/g, '. ').replace(/\n/g, '. ').trim()
+      let cleanText = text.replace(/[*#_~`>]/g, '').replace(/\n{2,}/g, '. ').replace(/\n/g, '. ').trim()
+      cleanText = cleanText.replace(/\bVahe\b/gi, 'Vah-heh')
 
       const response = await fetch('/api/tts', {
         method: 'POST',
@@ -272,7 +273,6 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
       const { data: sessionData } = await supabase.auth.getSession()
       const token = sessionData?.session?.access_token
 
-   const expenseData = { expenses: expensesRef.current, categories: categoriesRef.current }
       const systemPrompt = agentRef.current
         ? await agentRef.current.buildSystemPrompt(expenseData)
         : ''
@@ -299,7 +299,7 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
         throw new Error(data.error || 'Nova request failed')
       }
 
-   response =
+      response =
         data?.choices?.[0]?.message?.content ||
         data?.nova?.reply ||
         data?.nova?.message ||
