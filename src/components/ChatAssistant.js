@@ -269,39 +269,41 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
         agentRef.current.userTier = tier
       }
 
-      if (agentRef.current) {
-        const agentResult = await agentRef.current.detectAndExecute(userMessage, expenseData)
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData?.session?.access_token
 
-        if (agentResult.handled) {
-          response = agentResult.response
-          if (response.startsWith('✅ Added') || response.startsWith('✅ Done! Added')) {
-            await subscriptionManager.incrementUsage(userId, 'ai_parse_count')
-          }
-        } else {
-          const systemPrompt = await agentRef.current.buildSystemPrompt(expenseData)
-          const messages = agentRef.current.buildMessages(systemPrompt, userMessage)
-          const apiResponse = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages })
-          })
-          const data = await apiResponse.json()
-          response = data.choices?.[0]?.message?.content || '⚠️ Nova is having trouble connecting right now. Please try again in a moment.'
-        }
-      } else {
-        const apiResponse = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            messages: [
-              { role: 'system', content: `You are Nova, a friendly AI assistant for expense tracking. Be helpful and concise.` },
-              { role: 'user', content: userMessage }
-            ]
-          })
+   const expenseData = { expenses: expensesRef.current, categories: categoriesRef.current }
+      const systemPrompt = agentRef.current
+        ? await agentRef.current.buildSystemPrompt(expenseData)
+        : ''
+      const messages = agentRef.current
+        ? agentRef.current.buildMessages(systemPrompt, userMessage)
+        : [{ role: 'user', content: userMessage }]
+
+      const apiResponse = await fetch('/api/nova', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          messages,
+          userId,
+          tier
         })
-        const data = await apiResponse.json()
-        response = data.choices?.[0]?.message?.content || '⚠️ Nova is having trouble connecting right now.'
+      })
+
+      const data = await apiResponse.json()
+
+      if (!apiResponse.ok) {
+        throw new Error(data.error || 'Nova request failed')
       }
+
+   response =
+        data?.choices?.[0]?.message?.content ||
+        data?.nova?.reply ||
+        data?.nova?.message ||
+        'Nova is connected.'
 
       setLastResponse(response)
 
