@@ -183,7 +183,6 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
     try {
       const ttsCheck = await subscriptionManager.canUse(userId, 'tts')
       if (!ttsCheck.allowed) {
-        setLastResponse(`You've reached your daily voice limit (${ttsCheck.limit}). Upgrade for more!`)
         return
       }
 
@@ -249,7 +248,8 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
 
     const msgCheck = await subscriptionManager.canUse(userId, 'message')
     if (!msgCheck.allowed) {
-      setLastResponse(`You've reached your daily message limit (${msgCheck.limit}). Upgrade for more conversations with Nova!`)
+      const periodLabel = msgCheck.period === 'week' ? 'weekly' : 'daily'
+      setLastResponse(`You've reached your ${periodLabel} message limit (${msgCheck.limit}). Upgrade to PRO for more conversations with Nova!`)
       return
     }
 
@@ -331,7 +331,7 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
 
   const nickname = userProfile?.first_name || 'friend'
   const tier = userFeatures?.tier || 'free'
-  const tierLabel = tier === 'max' ? 'MAX' : tier === 'pro' ? 'PRO' : tier === 'admin' ? 'ADMIN' : tier === 'tester' ? 'TESTER' : null
+  const tierLabel = tier === 'max' ? 'MAX' : tier === 'pro' ? 'PRO' : tier === 'enterprise' ? 'ENTERPRISE' : tier === 'admin' ? 'ADMIN' : tier === 'tester' ? 'TESTER' : null
 
   return (
     <div style={{
@@ -346,7 +346,7 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
           <h3 style={{ margin: 0 }}>🤖 Nova AI Assistant</h3>
           {tierLabel && (
             <span style={{
-              background: tier === 'max' ? 'rgba(245, 158, 11, 0.4)' : tier === 'admin' ? 'rgba(236, 72, 153, 0.4)' : 'rgba(255,255,255,0.3)',
+              background: tier === 'max' ? 'rgba(245, 158, 11, 0.4)' : tier === 'enterprise' ? 'rgba(139, 92, 246, 0.4)' : tier === 'admin' ? 'rgba(236, 72, 153, 0.4)' : 'rgba(255,255,255,0.3)',
               padding: '4px 12px',
               borderRadius: '12px',
               fontSize: '12px',
@@ -489,7 +489,7 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
           background: 'rgba(255,255,255,0.2)',
           borderRadius: '8px', fontSize: '13px', textAlign: 'center'
         }}>
-          💡 Upgrade to PRO to unlock memory, advanced insights, and more!
+          💡 Upgrade to PRO to unlock voice, memory, advanced insights, and more!
         </div>
       )}
     </div>

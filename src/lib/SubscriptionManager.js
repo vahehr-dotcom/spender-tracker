@@ -2,11 +2,11 @@ import { supabase } from '../supabaseClient'
 
 const TIER_LIMITS = {
   free: {
-    daily_messages: 10,
-    daily_tts: 3,
-    daily_ai_parses: 5,
+    weekly_messages: 3,
+    daily_tts: 0,
+    daily_ai_parses: 3,
     custom_categories: 3,
-    voice_commands: false,
+    voice_commands: true,
     nova_memory: false,
     auto_categorization: false,
     tags: false,
@@ -19,9 +19,9 @@ const TIER_LIMITS = {
     full_nova: false,
   },
   pro: {
-    daily_messages: 50,
-    daily_tts: 25,
-    daily_ai_parses: 30,
+    daily_messages: 10,
+    daily_tts: 10,
+    daily_ai_parses: 10,
     custom_categories: Infinity,
     voice_commands: true,
     nova_memory: true,
@@ -36,9 +36,26 @@ const TIER_LIMITS = {
     full_nova: false,
   },
   max: {
-    daily_messages: Infinity,
-    daily_tts: Infinity,
-    daily_ai_parses: Infinity,
+    daily_messages: 30,
+    daily_tts: 30,
+    daily_ai_parses: 30,
+    custom_categories: Infinity,
+    voice_commands: true,
+    nova_memory: true,
+    auto_categorization: true,
+    tags: true,
+    regrouping: true,
+    receipt_scanning: true,
+    reports: true,
+    export: true,
+    multi_year: true,
+    tax_prep: true,
+    full_nova: true,
+  },
+  enterprise: {
+    daily_messages: 100,
+    daily_tts: 100,
+    daily_ai_parses: 100,
     custom_categories: Infinity,
     voice_commands: true,
     nova_memory: true,
@@ -163,8 +180,8 @@ class SubscriptionManager {
       isAdmin: tier === 'admin',
       isTester: tier === 'tester',
       isGuest: tier === 'guest',
-      isPaid: tier === 'pro' || tier === 'max',
-      isUnlimited: tier === 'admin' || tier === 'tester' || tier === 'max',
+      isPaid: tier === 'pro' || tier === 'max' || tier === 'enterprise',
+      isUnlimited: tier === 'admin' || tier === 'tester',
     }
   }
 
@@ -184,6 +201,37 @@ class SubscriptionManager {
       daysLeft,
       trialEnd: sub.trial_end,
     }
+  }
+
+  async getWeeklyUsage(userId) {
+    const now = new Date()
+    const dayOfWeek = now.getDay()
+    const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+    const monday = new Date(now)
+    monday.setDate(now.getDate() - mondayOffset)
+    monday.setHours(0, 0, 0, 0)
+    const mondayStr = monday.toISOString().split('T')[0]
+
+    const { data, error } = await supabase
+      .from('daily_usage')
+      .select('message_count, tts_count, ai_parse_count')
+      .eq('user_id', userId)
+      .gte('usage_date', mondayStr)
+
+    if (error) {
+      console.error('SubscriptionManager: Failed to fetch weekly usage', error)
+      return { message_count: 0, tts_count: 0, ai_parse_count: 0 }
+    }
+
+    const totals = { message_count: 0, tts_count: 0, ai_parse_count: 0 }
+    if (data) {
+      data.forEach(row => {
+        totals.message_count += row.message_count || 0
+        totals.tts_count += row.tts_count || 0
+        totals.ai_parse_count += row.ai_parse_count || 0
+      })
+    }
+    return totals
   }
 
   async getDailyUsage(userId) {
@@ -240,15 +288,33 @@ class SubscriptionManager {
 
   async canUse(userId, action) {
     const features = await this.getFeatures(userId)
+    const tier = features.tier
+
+    if (action === 'message') {
+      if (tier === 'free') {
+        const weeklyUsage = await this.getWeeklyUsage(userId)
+        const limit = features.weekly_messages
+        return {
+          allowed: limit === Infinity || weeklyUsage.message_count < limit,
+          remaining: limit === Infinity ? Infinity : Math.max(0, limit - weeklyUsage.message_count),
+          limit,
+          period: 'week',
+        }
+      } else {
+        const usage = await this.getDailyUsage(userId)
+        const limit = features.daily_messages
+        return {
+          allowed: limit === Infinity || usage.message_count < limit,
+          remaining: limit === Infinity ? Infinity : Math.max(0, limit - usage.message_count),
+          limit,
+          period: 'day',
+        }
+      }
+    }
+
     const usage = await this.getDailyUsage(userId)
 
     switch (action) {
-      case 'message':
-        return {
-          allowed: features.daily_messages === Infinity || usage.message_count < features.daily_messages,
-          remaining: features.daily_messages === Infinity ? Infinity : Math.max(0, features.daily_messages - usage.message_count),
-          limit: features.daily_messages,
-        }
       case 'tts':
         return {
           allowed: features.daily_tts === Infinity || usage.tts_count < features.daily_tts,
