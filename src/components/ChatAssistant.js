@@ -270,40 +270,48 @@ function ChatAssistant({ expenses, categories, isProMode, userFeatures, onUpgrad
         agentRef.current.userTier = tier
       }
 
-      const { data: sessionData } = await supabase.auth.getSession()
-      const token = sessionData?.session?.access_token
+      const agentResult = agentRef.current
+        ? await agentRef.current.detectAndExecute(userMessage, expenseData)
+        : { handled: false }
 
-      const systemPrompt = agentRef.current
-        ? await agentRef.current.buildSystemPrompt(expenseData)
-        : ''
-      const messages = agentRef.current
-        ? agentRef.current.buildMessages(systemPrompt, userMessage)
-        : [{ role: 'user', content: userMessage }]
+      if (agentResult.handled) {
+        response = agentResult.response
+      } else {
+        const { data: sessionData } = await supabase.auth.getSession()
+        const token = sessionData?.session?.access_token
 
-      const apiResponse = await fetch('/api/nova', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          messages,
-          userId,
-          tier
+        const systemPrompt = agentRef.current
+          ? await agentRef.current.buildSystemPrompt(expenseData)
+          : ''
+        const messages = agentRef.current
+          ? agentRef.current.buildMessages(systemPrompt, userMessage)
+          : [{ role: 'user', content: userMessage }]
+
+        const apiResponse = await fetch('/api/nova', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            messages,
+            userId,
+            tier
+          })
         })
-      })
 
-      const data = await apiResponse.json()
+        const data = await apiResponse.json()
 
-      if (!apiResponse.ok) {
-        throw new Error(data.error || 'Nova request failed')
+        if (!apiResponse.ok) {
+          throw new Error(data.error || 'Nova request failed')
+        }
+
+        response =
+          data?.choices?.[0]?.message?.content ||
+          data?.nova?.reply ||
+          data?.nova?.message ||
+          'Nova is connected.'
       }
-
-      response =
-        data?.choices?.[0]?.message?.content ||
-        data?.nova?.reply ||
-        data?.nova?.message ||
-        'Nova is connected.'
 
       setLastResponse(response)
 
