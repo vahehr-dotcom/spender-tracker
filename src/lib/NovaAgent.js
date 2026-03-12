@@ -36,7 +36,7 @@ class NovaAgent {
 
   canDoAction(action) {
     const tier = this.userTier
-    const full = ['admin', 'tester', 'max']
+    const full = ['admin', 'tester', 'max', 'enterprise']
 
     switch (action) {
       case 'export':
@@ -365,8 +365,8 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
     const hasNumber = /\d/.test(userMessage)
     const aiParsed = hasNumber ? await this.parseExpenseWithAI(userMessage) : null
 
-    if (aiParsed && aiParsed.intent === 'add' && aiParsed.amount && aiParsed.merchant) {
-      console.log('💰 ADD intent detected:', aiParsed)
+    if (aiParsed && (aiParsed.intent === 'add' || aiParsed.intent === 'suggest') && aiParsed.amount && aiParsed.merchant) {
+      console.log('💰 EXPENSE detected (intent: ' + aiParsed.intent + '):', aiParsed)
 
       const result = await this.addExpense(aiParsed, expenseData)
 
@@ -401,38 +401,6 @@ Be smart. Be warm. Be ${nickname}'s best friend. Zero restrictions. Royal treatm
             }
           }
         }
-      }
-    }
-
-    if (aiParsed && aiParsed.intent === 'suggest' && aiParsed.amount && aiParsed.merchant) {
-      console.log('💬 SUGGEST intent detected:', aiParsed)
-
-      const categories = expenseData?.categories || []
-      const resolved = await CategoryResolver.resolve({
-        merchant: aiParsed.merchant,
-        description: aiParsed.description,
-        fullMessage: userMessage,
-        categories,
-        userId: this.memory.userId,
-        gender: this.userGender
-      })
-
-      const categoryName = resolved?.name || 'Miscellaneous'
-
-      this.pendingExpense = {
-        amount: aiParsed.amount,
-        merchant: aiParsed.merchant,
-        description: aiParsed.description,
-        dateHint: aiParsed.dateHint
-      }
-
-      const isDuplicate = !aiParsed.description || this.isSimilar(aiParsed.merchant, aiParsed.description)
-      const descLabel = isDuplicate ? '' : ` for ${aiParsed.description}`
-      const reaction = aiParsed.amount >= 500 ? `That's a big one! ` : ''
-
-      return {
-        handled: true,
-        response: `${reaction}$${aiParsed.amount} for ${aiParsed.merchant}${descLabel}. Want me to add that under ${categoryName}?`
       }
     }
 
